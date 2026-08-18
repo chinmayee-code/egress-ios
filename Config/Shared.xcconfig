@@ -14,5 +14,11 @@ TARGETED_DEVICE_FAMILY = 1          // iPhone only
 SWIFT_VERSION = 6.0
 SWIFT_STRICT_CONCURRENCY = complete
 
+// Feature flags
+// EGRESS_FM_COACH compiles in the on-device Foundation Models coach (RALLY's end-of-run
+// summary/verdict/joke). When Apple Intelligence is unavailable the app falls back to the
+// canned coach at runtime, so defining this flag is safe on every device.
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) EGRESS_FM_COACH
+
 // Code signing is deliberately NOT here — leave it Xcode-managed (Signing & Capabilities)
 // so device builds for the G0 Apple-Intelligence spike keep working.

@@ -18,7 +18,7 @@ public enum Fix: Equatable, Sendable {
     public var summary: String {
         switch self {
         case let .widenExit(id, width): "Widen Exit \(id) to \(Self.metres(width))"
-        case .addExit: "Add an exit"
+        case let .addExit(a, b): "Add a \(Self.metres(a.distance(to: b))) exit"
         case let .relocateObstacle(id, _): "Move obstacle \(id) clear of the route"
         }
     }

@@ -8,10 +8,10 @@ import FoundationModels
 /// this is `false`, the whole app runs on `CannedCoach` — a fully coherent experience, per the
 /// §3.5.4 device-unsupported row.
 ///
-/// The Foundation-model probe lives behind the `EGRESS_FM_COACH` build flag: the model path is
-/// device- and Xcode-27-bound (the exact `@Generable`/`@Guide` spellings still need on-device
-/// verification, §3.5.2), so by default it is compiled out and the app ships the canned coach only.
-/// Define `EGRESS_FM_COACH` in the build settings once the model path has been verified on hardware.
+/// The Foundation-model probe lives behind the `EGRESS_FM_COACH` build flag, which is defined in
+/// Config/Shared.xcconfig. When the flag is set and the device reports Apple Intelligence as available,
+/// the on-device coach runs; otherwise (flag off, unsupported device, or model not ready) this returns
+/// `false` and the whole app runs on `CannedCoach` — a fully coherent experience per §3.5.4.
 enum DeviceCapabilities {
     static var supportsOnDeviceModel: Bool {
         #if EGRESS_FM_COACH && canImport(FoundationModels)

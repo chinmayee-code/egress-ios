@@ -1,62 +1,81 @@
 import EgressEngine
 import Foundation
+import os
 
 // The on-device Foundation-model coach and its validation gate (§3.5.2–3.5.3).
 //
-// This whole file is compiled only when the `EGRESS_FM_COACH` build flag is defined AND the SDK
-// provides FoundationModels. It is a faithful scaffold of the model path: the three `@Generable`
-// schemas, the prompt contract, and the V1–V8 gate. The exact `@Generable`/`@Guide` constraint
-// spellings still need verification in Xcode 27 on hardware (§3.5.2), which is why the flag is off by
-// default — the shipped, verified experience here is `CannedCoach`, and this drops in behind it once
-// confirmed on a device. Every path failure returns `fallback` advice, so the model can only ever make
-// the wording nicer, never leave the card empty or let an un-grounded number through.
+// This whole file is compiled in when the `EGRESS_FM_COACH` build flag is defined (it is, in
+// Config/Shared.xcconfig) AND the SDK provides FoundationModels. It writes RALLY's end-of-run summary,
+// verdict text, and joke on the device's own LLM, grounded to the engine's figures: the model is handed
+// the exact numbers it may cite and every number it writes is checked against them (V4). Every path
+// failure — refusal, timeout, an un-grounded figure, an infeasible fix — returns `fallback` (the canned
+// coach), so the model can only ever make the wording nicer, never leave the card empty or let a wrong
+// number through. On a device without Apple Intelligence the canned coach answers directly.
 #if EGRESS_FM_COACH && canImport(FoundationModels)
 import FoundationModels
 
 // MARK: - Generable schemas (§3.5.2)
 
-/// The metric the model may cite — by *key*, never a value; the app substitutes the engine number at
-/// render time, so the model cannot invent a figure.
-enum CoachMetricKey: String, Codable, CaseIterable, Sendable {
-    case peakDensity, clearanceTime, atRiskFraction, casualties
-    case exitFlowRate, exitClearWidth, corridorWidth, occupantCount, aisleClearWidth
-}
-
-enum FixTargetKind: String, Codable, CaseIterable, Sendable {
-    case exit, corridor, obstacle, wall
-}
-
+/// The kind of change a fix makes. The model picks the *intent*; the app authors the concrete geometry
+/// (via `FixPlanner`) so the model never has to invent coordinates.
 @Generable
-struct FixTarget {
-    @Guide(description: "Kind of element.") let kind: FixTargetKind
-    @Guide(description: "Identifier copied verbatim from the supplied venue element list.")
-    let elementID: String
+enum FixAction: String, Codable, CaseIterable, Sendable {
+    case widenExit    // make an existing door wider
+    case addExit      // open a new door on a wall
+    case moveObstacle // shift a movable prop off the route
 }
 
+/// A rectangular room's four walls, in the editor's screen convention (top = y 0, bottom = far edge).
+@Generable
+enum CoachWallSide: String, Codable, CaseIterable, Sendable {
+    case top, bottom, left, right
+}
+
+// The action button's label is authored engine-side from `Fix.summary`, so this schema carries only the
+// *intent* the app needs to build the fix — no free-text field to generate and then discard.
 @Generable
 struct GeometryFix {
-    @Guide(description: "Which element to change.") let target: FixTarget
-    @Guide(description: "Imperative instruction WITHOUT numbers, e.g. 'Widen the main corridor'.")
-    let instruction: String
-    @Guide(description: "The metric that justifies this fix.") let citedMetric: CoachMetricKey
-    @Guide(description: "Proposed new clear width in metres.", .range(0.9 ... 6.0))
+    @Guide(description: "The kind of change: widenExit, addExit, or moveObstacle.")
+    let action: FixAction
+    @Guide(description: "For widenExit, the exit id to widen. For moveObstacle, the movable prop id. Ignored for addExit — use 0.")
+    let elementID: Int
+    @Guide(description: "For addExit only: which wall (top, bottom, left, right) to open the new door on. Null for the other actions.")
+    let side: CoachWallSide?
+    @Guide(description: "For widenExit or addExit: the proposed clear width in metres. Null for moveObstacle.", .range(0.9 ... 6.0))
     let proposedMetres: Double?
 }
 
 @Generable
 struct WarnFailAdvice { // WARN + FAIL — no joke field, by design
-    @Guide(description: "One or two sentences naming WHERE and WHY the jam formed. Never write digits.")
+    @Guide(description: "A short uppercase banner headline, 2 to 4 words, e.g. 'BOTTLENECK DETECTED'.")
+    let headline: String
+    @Guide(description: "Two or three sentences of plain reasoning about WHERE and WHY the crowd jammed — name the specific exit, the props in the way (by id), the walls, and how packed the floor is. Reason in words, not statistics: you may mention an exit's width in metres and the number of occupants, but do NOT state crowd densities, clearance times, percentages, areas, or any proposed new measurement. Never invent a number.")
     let diagnosis: String
-    @Guide(description: "Two or three concrete fixes.", .count(2 ... 3))
+    @Guide(description: "Two or three fixes, each addressing the real cause — widen the bottleneck exit, add an exit on the clearest wall away from the jam, or move a named movable prop off the route. Do not default to widening unless the exit is genuinely the limit.", .count(2 ... 3))
     let fixes: [GeometryFix]
-    @Guide(description: "One supportive line. No humour. Never write digits.")
+    @Guide(description: "One short, warm supportive sentence. No humour, no numbers, and do not list the fixes.")
     let encouragement: String
+}
+
+/// Map the model's wall choice to the engine's `WallSide`.
+extension CoachWallSide {
+    var engineSide: WallSide {
+        switch self {
+        case .top: .top
+        case .bottom: .bottom
+        case .left: .left
+        case .right: .right
+        }
+    }
 }
 
 @Generable
 struct PassAdvice { // PASS only — the joke field exists ONLY here (§3.5.1)
+    @Guide(description: "A short uppercase banner headline, 2 to 4 words, e.g. 'EVACUATION SUCCESSFUL'.")
+    let headline: String
+    @Guide(description: "One or two sentences summarising the clean evacuation. You MAY state the exact figures from the run digest (clearance time, target, peak density) verbatim; invent no other number.")
     let summary: String
-    @Guide(description: "One light, safety-themed joke. Never about casualties or injury.")
+    @Guide(description: "One light, safety-themed joke. Never about casualties or injury. Keep it number-free.")
     let joke: String
 }
 
@@ -65,30 +84,39 @@ struct PassAdvice { // PASS only — the joke field exists ONLY here (§3.5.1)
 struct FoundationModelsCoach: Coach {
     /// Where every validation failure or timeout lands — the canned coach.
     let fallback: CannedCoach
-    /// V7 latency budget (§3.5.3).
-    private let timeout: Duration = .seconds(4)
+    /// V7 latency budget (§3.5.3). The WARN/FAIL schema generates a small array of structured fixes, which
+    /// takes longer on-device than the PASS summary — hence the generous window. The results card shows a
+    /// "RALLY is thinking…" state until this resolves, then falls back to the canned coach.
+    private let timeout: Duration = .seconds(20)
 
     func advise(for result: RunResult, venue: VenueModel) async -> CoachAdvice {
         let facts = CoachFacts(result: result, venue: venue)
         do {
             if result.verdict.level == .pass {
-                let advice: PassAdvice = try await generate(passPrompt(facts, venue))
-                return CoachValidation.validatePass(advice, facts: facts) ?? (await fallback.advise(for: result, venue: venue))
+                let raw: PassAdvice = try await generate(passPrompt(facts, venue))
+                if let validated = CoachValidation.validatePass(raw, facts: facts) { return validated }
+                Self.log.info("PASS advice failed validation; falling back to canned")
             } else {
-                let advice: WarnFailAdvice = try await generate(warnFailPrompt(facts, venue))
-                return CoachValidation.validateWarnFail(advice, result: result, venue: venue, facts: facts)
-                    ?? (await fallback.advise(for: result, venue: venue))
+                let raw: WarnFailAdvice = try await generate(warnFailPrompt(facts, venue))
+                if let validated = CoachValidation.validateWarnFail(raw, result: result, venue: venue, facts: facts) {
+                    return validated
+                }
+                Self.log.info("WARNFAIL failed validation. diagnosis=«\(raw.diagnosis, privacy: .public)» enc=«\(raw.encouragement, privacy: .public)» fixes=\(raw.fixes.count)")
             }
         } catch {
-            return await fallback.advise(for: result, venue: venue) // V1/V7: refusal, malformed, or timeout
+            Self.log.info("coach generation threw: \(String(describing: error), privacy: .public)")
         }
+        // Any validation miss or thrown error lands here (V4/V8 grounding, infeasible fix, timeout).
+        return await fallback.advise(for: result, venue: venue)
     }
 
+    private static let log = Logger(subsystem: "com.Egress.coach", category: "FoundationModelsCoach")
+
     /// Run one generation with the V7 timeout; the loser of the race throws so we fall back.
-    private func generate<T: Generable>(_ prompt: (instructions: String, user: String)) async throws -> T {
+    private func generate<T: Generable & Sendable>(_ prompt: (instructions: String, user: String)) async throws -> T {
         try await withThrowingTaskGroup(of: T.self) { group in
             group.addTask {
-                let session = LanguageModelSession(instructions: prompt.instructions)
+                let session = LanguageModelSession { prompt.instructions }
                 return try await session.respond(to: prompt.user, generating: T.self).content
             }
             group.addTask {
@@ -101,26 +129,74 @@ struct FoundationModelsCoach: Coach {
         }
     }
 
-    // MARK: Prompts — supply the digest, the valid element IDs, and the minima (§3.5.2 prompt contract)
+    // MARK: Prompts — supply the exact figures the model may cite plus the valid element IDs (§3.5.2)
 
     private var contract: String {
         """
-        You are RALLY, a calm building-safety coach. Use ONLY the supplied element IDs. \
-        NEVER write digits or numeric values in prose — cite a metric by its key instead. \
-        Minimum clear widths: interior door 0.9 m, final exit 1.2 m, corridor 1.2 m.
+        You are RALLY, a calm, encouraging building-safety coach for an evacuation simulator, speaking \
+        to a general audience in plain, warm language. You may state ONLY the exact figures listed in \
+        the run digest — copy them verbatim. Do NOT do arithmetic of any kind: never divide, multiply, \
+        add, or subtract, and never compute a per-person area, a percentage, a rate, or a total that is \
+        not already written in the digest. Reference only the element IDs the digest lists.
         """
     }
 
+    /// The grounded figures the model is allowed to cite, written out so it can weave them into prose —
+    /// the run numbers *and* the physical layout (room size, clear floor, exits, props) so the diagnosis
+    /// can reason about the real cause rather than defaulting to "widen the exit".
+    private func digest(_ facts: CoachFacts) -> String {
+        """
+        Run digest — state these figures verbatim, invent no others:
+        • Safety score: \(facts.score) out of 100.
+        • Clearance time: \(facts.clearance) s (target \(facts.target) s, cap \(facts.cap) s).
+        • Peak crowd density: \(facts.peakDensityText) \(facts.peakLocation); caution band \(facts.cautionBandText).
+        • Occupants: \(facts.occupancy); casualties: \(facts.casualties); trapped: \(facts.trapped).
+        • At-risk crowd: \(facts.atRiskPct)% dwelt over \(facts.dwell) s in the danger band.
+
+        Layout — a \(facts.venueWidth)×\(facts.venueHeight) m room; with \(facts.occupancy) people that is \
+        only about \(facts.spacePerPerson) m² of clear floor each.
+        Exits (\(facts.exitCount)):
+        \(Self.bulleted(facts.exitLines))
+        Movable props you may relocate:
+        \(Self.bulleted(facts.movableLines))
+        Fixed structures the crowd must route around (cannot be moved):
+        \(Self.bulleted(facts.structureLines))
+        """
+    }
+
+    /// Render layout lines as an indented bullet list, or "  • none" when empty.
+    private static func bulleted(_ lines: [String]) -> String {
+        guard !lines.isEmpty else { return "  • none" }
+        return lines.map { "  • \($0)" }.joined(separator: "\n")
+    }
+
     private func warnFailPrompt(_ facts: CoachFacts, _ venue: VenueModel) -> (String, String) {
-        (contract, """
-        Run digest: worst crowding \(facts.peakLocation); score \(facts.score).
-        Valid element IDs: \(CoachValidation.elementIDList(for: venue)).
-        Diagnose where and why the crowd jammed, then propose 2–3 concrete geometry fixes.
+        let exitIDs = facts.exitIDs.map(String.init).joined(separator: ", ")
+        let movableIDs = facts.movableObstacleIDs.isEmpty
+            ? "none — do not propose moving anything"
+            : facts.movableObstacleIDs.map(String.init).joined(separator: ", ")
+        return (contract, """
+        \(digest(facts))
+
+        Fix options for THIS layout:
+        • widenExit — widen one of these exits by id: \(exitIDs).
+        • moveObstacle — move one of these movable props by id: \(movableIDs). Fixed structures can never be moved.
+        • addExit — open a new door on the wall (top, bottom, left, right) with the most clear space, ideally \
+        away from the jam so it splits the flow.
+
+        Write the headline, then a diagnosis that weighs the exits, the props in the way, and how crowded \
+        the floor is — reason in plain words and name elements by id; the exact densities and times are \
+        shown elsewhere, so don't recite them. Then give 2–3 fixes that fit this layout (choose the action \
+        that addresses the real cause — do not just widen), then one short supportive line.
         """)
     }
 
     private func passPrompt(_ facts: CoachFacts, _ venue: VenueModel) -> (String, String) {
-        (contract, "The \(venue.type.displayName) evacuated cleanly. Give a one-line summary and one light, safety-themed joke.")
+        (contract, """
+        \(digest(facts))
+        The \(venue.type.displayName) evacuated cleanly. Write a short headline, a one or two sentence \
+        summary that states the clearance time and target, and one light, safety-themed, number-free joke.
+        """)
     }
 }
 
@@ -131,28 +207,30 @@ private enum CoachError: Error { case timedOut }
 /// V1–V8 — the model's output must clear every check or we fall back. Numbers are never trusted from the
 /// model (V4); geometry must be feasible (V5); every element must exist (V2); jokes are casualty-free (V8).
 enum CoachValidation {
-    /// The exit/obstacle/wall IDs the model is allowed to reference, as a prompt-friendly list.
-    static func elementIDList(for venue: VenueModel) -> String {
-        let exits = venue.exits.map { "exit \($0.id)" }
-        let obstacles = venue.obstacles.map { "obstacle \($0.id)" }
-        return (exits + obstacles).joined(separator: ", ")
-    }
-
     /// Validate WARN/FAIL advice → a rendered `CoachAdvice`, or `nil` to fall back.
     static func validateWarnFail(
         _ advice: WarnFailAdvice, result: RunResult, venue: VenueModel, facts: CoachFacts
     ) -> CoachAdvice? {
         guard nonEmpty(advice.diagnosis), nonEmpty(advice.encouragement) else { return nil } // V1
-        guard noDigits(advice.diagnosis), noDigits(advice.encouragement) else { return nil }  // V4
+        // V4: any figure in the substantive diagnosis must be a grounded engine figure. The supportive
+        // encouragement is number-free by instruction and renders below the authoritative WHY box, so it
+        // isn't number-gated — that keeps a stray word-number from needlessly dropping good advice.
+        guard numbersAreGrounded(advice.diagnosis, facts: facts) else { return nil }
 
-        // V2 + V3 + V5: keep only fixes that name a real element, cite a relevant metric, and are feasible.
-        let feasible = advice.fixes.compactMap { engineFix(from: $0, venue: venue) }
-        guard !feasible.isEmpty else { return nil }              // V3: at least one survives
-        // V6: 2–3 fixes ideally; a single strong feasible fix is still shown (padded from the engine's own).
+        // V2 + V5: author a feasible engine Fix for each model intent, dropping any that can't be placed,
+        // and de-duping identical results so the two shown fixes always differ.
+        let jam = result.metrics.peakLocation.map { venue.geometry.worldCenter(of: $0) }
+        var feasible: [Fix] = []
+        for candidate in advice.fixes.compactMap({ engineFix(from: $0, venue: venue, jam: jam) })
+            where !feasible.contains(candidate) {
+            feasible.append(candidate)
+        }
+        // Keep the model's rich, layout-aware prose even if geometry authoring failed — fall back to the
+        // engine's own grounded fix for the action button rather than dropping to fully canned text.
         let primary = feasible.first ?? result.fix
 
         return CoachAdvice(
-            headline: "BOTTLENECK DETECTED",
+            headline: validHeadline(advice.headline, facts: facts) ?? "BOTTLENECK DETECTED",
             body: advice.diagnosis,
             closing: advice.encouragement,
             primaryFix: primary,
@@ -163,10 +241,12 @@ enum CoachValidation {
 
     /// Validate PASS advice; drops the joke (V8) if it references injury, keeping the summary.
     static func validatePass(_ advice: PassAdvice, facts: CoachFacts) -> CoachAdvice? {
-        guard nonEmpty(advice.summary), noDigits(advice.summary) else { return nil } // V1 + V4
-        let joke = jokeIsClean(advice.joke) ? advice.joke : nil                       // V8
+        guard nonEmpty(advice.summary), numbersAreGrounded(advice.summary, facts: facts) else { return nil } // V1 + V4
+        // V8: the joke stays casualty-free; if it slips in a figure, that too must be grounded.
+        let jokeOK = jokeIsClean(advice.joke) && numbersAreGrounded(advice.joke, facts: facts)
+        let joke = jokeOK ? advice.joke : nil
         return CoachAdvice(
-            headline: "EVACUATION SUCCESSFUL",
+            headline: validHeadline(advice.headline, facts: facts) ?? "EVACUATION SUCCESSFUL",
             body: advice.summary,
             closing: joke,
             primaryFix: nil,
@@ -181,26 +261,63 @@ enum CoachValidation {
         !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// V4 numeral scan — the model is told never to write digits, so any digit in prose fails the check.
-    private static func noDigits(_ s: String) -> Bool {
-        s.rangeOfCharacter(from: .decimalDigits) == nil
+    /// V4 grounded-number check — every decimal number the model wrote in this text must be one of the
+    /// run's approved engine figures. The model may phrase freely; it just cannot state a figure the run
+    /// didn't produce. One ungrounded number fails the whole piece of advice, dropping us to the fallback.
+    private static func numbersAreGrounded(_ text: String, facts: CoachFacts) -> Bool {
+        let approved = facts.approvedFigures
+        return numericTokens(in: text).allSatisfy { approved.contains($0) }
     }
 
-    /// V2 + V5: resolve a model fix to a feasible engine `Fix`, or `nil` to drop it.
-    private static func engineFix(from fix: GeometryFix, venue: VenueModel) -> Fix? {
-        switch fix.target.kind {
-        case .exit:
-            guard let id = Int(fix.target.elementID.filter(\.isNumber)),
-                  venue.exits.contains(where: { $0.id == id }),
-                  let width = fix.proposedMetres else { return nil }
-            let candidate = Fix.widenExit(id: id, width: width)
-            return candidate.feasibility(in: venue).isFeasible ? candidate : nil
-        case .obstacle:
-            // Relocation authoring is a Stretch path; V5 already forbids moving fixed props. Dropped here
-            // until the model is given a target origin to move the obstacle to.
+    /// Pull ASCII decimal-number tokens (e.g. "42", "5.4") out of prose. Non-ASCII numerals and unit
+    /// superscripts (the "²" in "p·m⁻²") are deliberately not treated as digits.
+    private static func numericTokens(in text: String) -> [String] {
+        var tokens: [String] = []
+        var current = ""
+        func flush() {
+            while current.hasSuffix(".") { current.removeLast() }
+            if !current.isEmpty { tokens.append(current) }
+            current = ""
+        }
+        for ch in text {
+            if (ch >= "0" && ch <= "9") || (ch == "." && !current.isEmpty) {
+                current.append(ch)
+            } else {
+                flush()
+            }
+        }
+        flush()
+        return tokens
+    }
+
+    /// A model-authored banner headline, accepted only when it's short and every figure in it is
+    /// grounded; otherwise the caller's fixed headline stands in.
+    private static func validHeadline(_ headline: String, facts: CoachFacts) -> String? {
+        let trimmed = headline.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.count <= 40, numbersAreGrounded(trimmed, facts: facts) else { return nil }
+        return trimmed.uppercased()
+    }
+
+    /// V2 + V5: resolve a model fix intent to a feasible engine `Fix`, or `nil` to drop it. The concrete
+    /// geometry (new widths, doorway spans, relocation origins) is authored engine-side by `FixPlanner`
+    /// and re-checked by `Fix.feasibility`, so the model only ever supplies intent — never coordinates.
+    private static func engineFix(from fix: GeometryFix, venue: VenueModel, jam: Vec2?) -> Fix? {
+        switch fix.action {
+        case .widenExit:
+            guard let exit = venue.exits.first(where: { $0.id == fix.elementID }) else { return nil }
+            // Widen past the current door to at least the exit minimum; honour the model's number when it
+            // is a genuine widening, else pick a sensible larger width. Feasibility guards the bounds.
+            let desired = max(fix.proposedMetres ?? 0, exit.width + 0.4, SafetyStandards.minExitWidth)
+            for width in [desired, SafetyStandards.minExitWidth] {
+                let candidate = Fix.widenExit(id: exit.id, width: width)
+                if candidate.feasibility(in: venue).isFeasible { return candidate }
+            }
             return nil
-        case .corridor, .wall:
-            return nil
+        case .moveObstacle:
+            return FixPlanner.relocation(ofObstacle: fix.elementID, awayFrom: jam, in: venue)
+        case .addExit:
+            guard let side = fix.side?.engineSide else { return nil }
+            return FixPlanner.newExit(on: side, in: venue, width: fix.proposedMetres)
         }
     }
 
