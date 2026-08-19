@@ -73,17 +73,18 @@ struct SettingsSheet: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+        .onAppear { feedback.sound.play(.popup) }
+        .egButtonSound()
     }
 
     // MARK: Pieces
 
     /// One titled section: a letter-spaced uppercase label, a pixel-bordered cream card of rows, and an
     /// optional quiet footer beneath — the Form section restyled as pixel chrome.
-    @ViewBuilder
-    private func settingsCard<Content: View>(
+    private func settingsCard(
         _ title: String,
         footer: String? = nil,
-        @ViewBuilder content: () -> Content
+        @ViewBuilder content: () -> some View
     ) -> some View {
         VStack(alignment: .leading, spacing: EgressSpacing.sm) {
             Text(title)

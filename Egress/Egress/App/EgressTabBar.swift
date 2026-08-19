@@ -33,6 +33,7 @@ struct EgressTabBar: View {
         .padding(.top, plusRise) // reserve the part of the circle that rises above the pill
         .padding(.horizontal, 40) // narrower bar — more breathing room at the screen edges (design)
         .padding(.bottom, EgressSpacing.xs)
+        .egButtonSound()
     }
 
     // MARK: Pieces
@@ -85,12 +86,21 @@ struct EgressTabBar: View {
     }
 }
 
+// MARK: - PlusPress
+
 /// A springy dip for the centre ＋ — it presses like a physical arcade button.
 private struct PlusPress: ButtonStyle {
+    @Environment(FeedbackServices.self) private var feedback: FeedbackServices?
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.9 : 1)
             .animation(Motion.tap, value: configuration.isPressed)
+            .onChange(of: configuration.isPressed) { _, isPressed in
+                if isPressed {
+                    feedback?.sound.play(.buttonTap)
+                }
+            }
     }
 }
 

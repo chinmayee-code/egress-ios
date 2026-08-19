@@ -68,7 +68,11 @@ struct EditorRootView: View {
         VStack(spacing: EgressSpacing.sm) {
             HStack(spacing: EgressSpacing.sm) {
                 circleButton("chevron.left", label: "Back") {
-                    if let onClose { onClose() } else { dismiss() }
+                    if let onClose {
+                        onClose()
+                    } else {
+                        dismiss()
+                    }
                 }
                 Button { showConfig = true } label: {
                     HStack(spacing: 6) {
@@ -499,10 +503,9 @@ private struct EditorConfigSheet: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
-        // Pin an opaque cream background so the sheet reads the same at every detent — otherwise iOS gives
-        // the medium detent a translucent material that warms the cards, and the large (stretched) detent
-        // turns opaque and reveals a jarring near-white. One committed cream look, expanded or not.
         .presentationBackground(Color.egGround)
+        .onAppear { feedback?.sound.play(.popup) }
+        .egButtonSound()
     }
 
     /// Exits as an accessible list (§5.6): a clear-width stepper and remove, plus an add-on-edge menu so

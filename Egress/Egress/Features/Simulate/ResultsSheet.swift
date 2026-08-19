@@ -72,6 +72,7 @@ struct ResultsSheet: View {
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .onAppear {
+            feedback?.sound.play(.popup)
             if reduceMotion {
                 ringProgress = CGFloat(result.score.value) / 100 // no sweep — settle on the final value
             } else {
@@ -80,6 +81,7 @@ struct ResultsSheet: View {
                 }
             }
         }
+        .egButtonSound()
         .task(id: result.id) {
             advice = await CoachProvider.shared.advise(for: result, venue: result.venue)
             if advice != nil {
@@ -108,7 +110,7 @@ struct ResultsSheet: View {
         switch level {
         case .pass: feedback?.sound.play(.verdictPass)
             feedback?.haptics.play(.verdictPass)
-        case .warn: feedback?.sound.play(.sting)
+        case .warn: feedback?.sound.play(.warning)
             feedback?.haptics.play(.verdictWarn)
         case .fail: feedback?.sound.play(.verdictFail)
             feedback?.haptics.play(.verdictFail)
