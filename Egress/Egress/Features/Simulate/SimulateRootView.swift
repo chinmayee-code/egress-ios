@@ -81,6 +81,8 @@ struct SimulateScreen: View {
     @State private var thermalState = ProcessInfo.processInfo.thermalState
     /// Last VoiceOver announcement time — escalation/verdict announcements stay ≥4 s apart (§5.6).
     @State private var lastAnnouncement: Date = .distantPast
+    /// Tracks processed casualties so every dying agent gets their specific death sound once.
+    @State private var processedCasualtyIDs: Set<Int> = []
 
     init(
         venue: VenueModel = SampleVenue.crowdedClub(),
@@ -109,11 +111,11 @@ struct SimulateScreen: View {
                                 EscalationBanner(escalation: escalation)
                             }
                         }
-                        .padding(EgressSpacing.md)
+                        .padding(.top, EgressSpacing.sm)
                     }
                     .overlay(alignment: .bottomTrailing) {
                         SimDensityChip(density: controller.snapshot.live.worstDensity, band: densityBand)
-                            .padding(EgressSpacing.md)
+                            .padding([.bottom, .trailing], EgressSpacing.md)
                     }
                     .overlay(alignment: .bottomLeading) {
                         SimZoomControls(controller: controller)
@@ -171,7 +173,10 @@ struct SimulateScreen: View {
                 feedback?.sound.stopAmbience()
             }
         }
-        .onChange(of: controller.snapshot.time) { _, _ in updateAmbience() }
+        .onChange(of: controller.snapshot.time) { _, _ in
+            updateAmbience()
+            checkCasualties()
+        }
         .onDisappear { feedback?.sound.stopAmbience() }
         .onChange(of: controller.result?.id) { _, id in
             if id != nil {
@@ -205,7 +210,6 @@ struct SimulateScreen: View {
         )
     }
 
-    /// Save the just-resolved run to the local SwiftData store — the Spaces history and run record (§3.6).
     private func persistLatestRun() {
         guard let result = controller.result else { return }
         let record = RunRecord(
@@ -226,11 +230,15 @@ struct SimulateScreen: View {
     /// Hold a running sim when the app leaves the foreground and never auto-resume on return — the run is
     /// only advanced while it's being watched. Coming back raises the `PAUSED` panel.
     private func handleScenePhase(_ phase: ScenePhase) {
-        // Only a true background trip holds the run — transient `.inactive` (Control Center, a banner)
-        // must not force a manual resume mid-demo.
-        guard phase == .background, controller.isRunning else { return }
-        controller.pause()
-        pausedOnReturn = true
+        switch phase {
+        case .inactive, .background:
+            if controller.isRunning {
+                controller.pause()
+                pausedOnReturn = true
+            }
+        default:
+            break
+        }
     }
 
     /// Explicit resume from the `PAUSED` panel — the only way a backgrounded run continues.
@@ -266,17 +274,20 @@ struct SimulateScreen: View {
             controller.pause()
         } else {
             if controller.snapshot.live.elapsed == 0 {
-                feedback?.sound.play(.klaxon)
+                processedCasualtyIDs.removeAll()
+                feedback?.sound.play(.startSim)
                 feedback?.haptics.play(.alarm)
             }
             controller.play()
         }
     }
 
-    /// A new live band crossed: the sting, the band-specific haptic, and a throttled announcement.
+    /// A new live band crossed: the warning or death cue, the band-specific haptic, and a throttled announcement.
     private func announceEscalation() {
         guard let escalation = controller.escalation else { return }
-        feedback?.sound.play(.sting)
+        if escalation.band != .casualty {
+            feedback?.sound.play(.warning)
+        }
         switch escalation.band {
         case .congestion: feedback?.haptics.play(.congestion)
         case .bottleneck: feedback?.haptics.play(.bottleneck)
@@ -285,6 +296,25 @@ struct SimulateScreen: View {
         case .casualty: feedback?.haptics.play(.casualty)
         }
         announce(escalation.band.headline, throttled: true)
+    }
+
+    /// Check for any new casualty agent and play their gender-specific or default death sound.
+    private func checkCasualties() {
+        if controller.snapshot.time == 0 {
+            processedCasualtyIDs.removeAll()
+            return
+        }
+        for agent in controller.snapshot.agents where agent.status.isCasualty {
+            // Each casualty sounds exactly once, the first frame they go down.
+            guard processedCasualtyIDs.insert(agent.id).inserted else { continue }
+            if agent.mobility == .adult {
+                // Match the on-screen sprite's own gender so the voice fits the visible character.
+                feedback?.sound.playDeath(AgentSprites.readsAsMale(id: agent.id) ? .deathMale : .deathFemale)
+            } else {
+                // Child / elderly / wheelchair / staff → the neutral impact (no gendered vocal).
+                feedback?.sound.playDeath(.deathImpact)
+            }
+        }
     }
 
     /// The end-of-run verdict announcement — posted immediately so a VoiceOver user hears the outcome
@@ -313,13 +343,18 @@ struct SimulateScreen: View {
         SimDensityBand(density: controller.snapshot.live.worstDensity)
     }
 
-    /// Drive the ambient beds from the live run: the crowd murmur swells with peak density, the fire
-    /// crackle with how many cells are alight. Only while actually running (a paused/scrubbed frame is
-    /// silent).
+    /// Drive the ambient beds from the live run: crowd murmur scales with peak density AND the remaining
+    /// active crowd ratio (fading out smoothly as agents evacuate towards the end).
     private func updateAmbience() {
         guard controller.isRunning else { return }
-        let crowd = 0.3 + 0.7 * min(1, controller.snapshot.live.worstDensity / 6)
-        let fire = min(1, Double(controller.snapshot.hazards.fire.count) / 40)
+        let live = controller.snapshot.live
+        let totalAgents = live.activeCount + live.evacuatedCount + live.casualtyCount
+        let activeFraction = totalAgents > 0 ? Double(live.activeCount) / Double(totalAgents) : 0
+        let densityFactor = min(1.0, live.worstDensity / 6.0)
+
+        // Crowd murmur scales dynamically with active crowd ratio, fading out to 0 at the end of run
+        let crowd = (0.15 + 0.85 * densityFactor) * activeFraction
+        let fire = min(1.0, Double(controller.snapshot.hazards.fire.count) / 40.0)
         feedback?.sound.setAmbience(crowd: crowd, fire: fire)
     }
 

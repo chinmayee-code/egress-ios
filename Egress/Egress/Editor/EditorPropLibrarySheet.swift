@@ -47,6 +47,8 @@ struct PropLibrarySheet: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        .onAppear { feedback?.sound.play(.popup) }
+        .egButtonSound()
     }
 
     // MARK: Legend — the three sim-class chrome treatments

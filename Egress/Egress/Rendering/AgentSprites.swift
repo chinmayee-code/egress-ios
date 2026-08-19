@@ -27,12 +27,12 @@ enum AgentSprites {
     /// Skin tones, light → deep.
     private static let skinTones: [Color] = [
         Color(hex: 0xF4C9A5), Color(hex: 0xE0AC79), Color(hex: 0xC68642),
-        Color(hex: 0x8D5524), Color(hex: 0x5A3A22),
+        Color(hex: 0x8D5524), Color(hex: 0x5A3A22)
     ]
     /// Hair — black, browns, ginger, blond, grey, a dyed red.
     private static let hairColors: [Color] = [
         Color(hex: 0x1A1512), Color(hex: 0x3A2817), Color(hex: 0x6B3F1D), Color(hex: 0xA6672B),
-        Color(hex: 0xD9B36A), Color(hex: 0xB8B8BC), Color(hex: 0x8A2E1E),
+        Color(hex: 0xD9B36A), Color(hex: 0xB8B8BC), Color(hex: 0x8A2E1E)
     ]
     /// Index into `hairColors` of the grey — forced onto elderly agents.
     private static let greyHairIndex = 5
@@ -40,12 +40,12 @@ enum AgentSprites {
     private static let topColors: [Color] = [
         Color(hex: 0xB84A3E), Color(hex: 0x2E6DB4), Color(hex: 0x2A8C5A), Color(hex: 0x7D4CA5),
         Color(hex: 0xD46FA0), Color(hex: 0xE0842E), Color(hex: 0x444B54), Color(hex: 0xC9A24B),
-        Color(hex: 0x2E9AA0),
+        Color(hex: 0x2E9AA0)
     ]
     /// Trousers / skirts — muted lower half.
     private static let bottomColors: [Color] = [
         Color(hex: 0x2C3E50), Color(hex: 0x4A3B2A), Color(hex: 0x34404A),
-        Color(hex: 0x6E5A3A), Color(hex: 0x222225), Color(hex: 0x5A5F66),
+        Color(hex: 0x6E5A3A), Color(hex: 0x222225), Color(hex: 0x5A5F66)
     ]
     private static let shoeColor = Color(hex: 0x1A1613)
     private static let caneColor = Color(hex: 0x74532F)
@@ -138,7 +138,9 @@ enum AgentSprites {
                 for (col, ch) in line.enumerated() {
                     guard ch != " " else { continue }
                     // Panic raises the arms: drop the side hands, we redraw them overhead below.
-                    if panicked, ch == "S" { continue }
+                    if panicked, ch == "S" {
+                        continue
+                    }
 
                     var y = originY + CGFloat(row) * cell
                     // Alternating footfall — lift each shoe out of phase with the other.
@@ -156,7 +158,11 @@ enum AgentSprites {
                     case "H": hair[hairIdx].addRect(rect)
                     case "F", "S": skin[skinIdx].addRect(rect)
                     case "T":
-                        if isStaff { staffVests.addRect(rect) } else { tops[topIdx].addRect(rect) }
+                        if isStaff {
+                            staffVests.addRect(rect)
+                        } else {
+                            tops[topIdx].addRect(rect)
+                        }
                     case "P": bottoms[botIdx].addRect(rect)
                     case "B": shoes.addRect(rect)
                     case "C": canes.addRect(rect)
@@ -224,13 +230,21 @@ enum AgentSprites {
         context.stroke(auraPanicked, with: .color(.egAgentPanicked.opacity(0.7)), lineWidth: 1.4)
         context.stroke(wheels, with: .color(.egAgentCalm.opacity(0.85)), lineWidth: 1.6)
 
-        for (i, path) in bottoms.enumerated() { context.fill(path, with: .color(bottomColors[i])) }
+        for (i, path) in bottoms.enumerated() {
+            context.fill(path, with: .color(bottomColors[i]))
+        }
         context.fill(shoes, with: .color(shoeColor))
         context.fill(canes, with: .color(caneColor))
         context.fill(staffVests, with: .color(.egAgentStaff))
-        for (i, path) in tops.enumerated() { context.fill(path, with: .color(topColors[i])) }
-        for (i, path) in skin.enumerated() { context.fill(path, with: .color(skinTones[i])) }
-        for (i, path) in hair.enumerated() { context.fill(path, with: .color(hairColors[i])) }
+        for (i, path) in tops.enumerated() {
+            context.fill(path, with: .color(topColors[i]))
+        }
+        for (i, path) in skin.enumerated() {
+            context.fill(path, with: .color(skinTones[i]))
+        }
+        for (i, path) in hair.enumerated() {
+            context.fill(path, with: .color(hairColors[i]))
+        }
         context.fill(staffCaps, with: .color(staffCapColor))
         context.fill(faceInk, with: .color(faceInkColor)) // eyes + mouth on top of the face
 
@@ -241,14 +255,24 @@ enum AgentSprites {
 
     private enum Sex { case male, female }
 
-    private static func sex(of id: Int) -> Sex { pick(id, salt: 0x0F, mod: 2) == 0 ? .male : .female }
+    private static func sex(of id: Int) -> Sex {
+        pick(id, salt: 0x0F, mod: 2) == 0 ? .male : .female
+    }
+
+    /// Whether agent `id` reads as male on screen — the single source of truth the sprite draws with
+    /// (`sex(of:)`), reused by the death-sound picker so the dying voice matches the visible character.
+    static func readsAsMale(id: Int) -> Bool {
+        sex(of: id) == .male
+    }
 
     /// A stable small index in `0..<mod`, hashed from the agent id + a per-attribute salt. Deterministic,
     /// no RNG — so the same person is always the same person, frame to frame and run to run.
     private static func pick(_ id: Int, salt: UInt64, mod: Int) -> Int {
         var h = UInt64(bitPattern: Int64(id)) &+ salt &* 0x9E37_79B9_7F4A_7C15
-        h ^= h >> 30; h &*= 0xBF58_476D_1CE4_E5B9
-        h ^= h >> 27; h &*= 0x94D0_49BB_1331_11EB
+        h ^= h >> 30
+        h &*= 0xBF58_476D_1CE4_E5B9
+        h ^= h >> 27
+        h &*= 0x94D0_49BB_1331_11EB
         h ^= h >> 31
         return Int(h % UInt64(mod))
     }
@@ -277,14 +301,23 @@ enum AgentSprites {
         let mouthOpen: Bool
         switch emotion {
         case .calm:
-            eyeSize = cell * 0.40; eyeGap = width * 0.44
-            mouthWidth = width * 0.40; mouthHeight = cell * 0.26; mouthOpen = false
+            eyeSize = cell * 0.40
+            eyeGap = width * 0.44
+            mouthWidth = width * 0.40
+            mouthHeight = cell * 0.26
+            mouthOpen = false
         case .uneasy:
-            eyeSize = cell * 0.44; eyeGap = width * 0.44
-            mouthWidth = width * 0.34; mouthHeight = cell * 0.48; mouthOpen = true
+            eyeSize = cell * 0.44
+            eyeGap = width * 0.44
+            mouthWidth = width * 0.34
+            mouthHeight = cell * 0.48
+            mouthOpen = true
         case .panicked:
-            eyeSize = cell * 0.56; eyeGap = width * 0.52
-            mouthWidth = width * 0.52; mouthHeight = cell * 0.95; mouthOpen = true
+            eyeSize = cell * 0.56
+            eyeGap = width * 0.52
+            mouthWidth = width * 0.52
+            mouthHeight = cell * 0.95
+            mouthOpen = true
         }
 
         let cx = originX + width / 2
@@ -294,7 +327,11 @@ enum AgentSprites {
 
         let mouthY = originY + height * (mouthOpen ? 0.60 : 0.72)
         let mouth = CGRect(x: cx - mouthWidth / 2, y: mouthY, width: mouthWidth, height: mouthHeight)
-        if mouthOpen { ink.addEllipse(in: mouth) } else { ink.addRect(mouth) }
+        if mouthOpen {
+            ink.addEllipse(in: mouth)
+        } else {
+            ink.addRect(mouth)
+        }
     }
 
     // MARK: Emote badges
@@ -402,7 +439,9 @@ extension AgentSprites {
         for (row, line) in sprite.rows.enumerated() {
             for (col, ch) in line.enumerated() {
                 guard ch != " " else { continue }
-                if panicked, ch == "S" { continue } // side hands go overhead when screaming
+                if panicked, ch == "S" {
+                    continue
+                } // side hands go overhead when screaming
                 let drawCol = mirrored ? (lastCol - col) : col
                 var y = originY + CGFloat(row) * cell
                 if walking, ch == "B", let legIdx = shoeCols.firstIndex(of: col) {
@@ -485,13 +524,17 @@ private struct Sprite {
     let rows: [String]
     let scale: CGFloat
 
-    var columns: Int { rows.map(\.count).max() ?? 0 }
+    var columns: Int {
+        rows.map(\.count).max() ?? 0
+    }
 
     /// Columns carrying a shoe (`B`) — the feet the walk cycle lifts, out of phase with each other.
     var shoeColumns: [Int] {
         var cols = Set<Int>()
         for line in rows {
-            for (col, ch) in line.enumerated() where ch == "B" { cols.insert(col) }
+            for (col, ch) in line.enumerated() where ch == "B" {
+                cols.insert(col)
+            }
         }
         return cols.sorted()
     }
@@ -502,8 +545,10 @@ private struct Sprite {
         var minRow = Int.max, maxRow = Int.min, minCol = Int.max, maxCol = Int.min
         for (row, line) in rows.enumerated() {
             for (col, ch) in line.enumerated() where ch == "F" {
-                minRow = min(minRow, row); maxRow = max(maxRow, row)
-                minCol = min(minCol, col); maxCol = max(maxCol, col)
+                minRow = min(minRow, row)
+                maxRow = max(maxRow, row)
+                minCol = min(minCol, col)
+                maxCol = max(maxCol, col)
             }
         }
         guard minRow <= maxRow else { return nil }
@@ -520,7 +565,7 @@ private struct Sprite {
         }
     }
 
-    // Broad shoulders, arms at the sides, two stepping legs — the reference male build.
+    /// Broad shoulders, arms at the sides, two stepping legs — the reference male build.
     static let adultMale = Sprite(rows: [
         " HHHH ",
         "HHHHHH",
@@ -531,10 +576,10 @@ private struct Sprite {
         "STTTTS",
         " PPPP ",
         " P  P ",
-        " B  B ",
+        " B  B "
     ], scale: 1.0)
 
-    // Longer hair framing the face, narrower shoulders — reads female without relying on colour.
+    /// Longer hair framing the face, narrower shoulders — reads female without relying on colour.
     static let adultFemale = Sprite(rows: [
         " HHHH ",
         "HHHHHH",
@@ -545,10 +590,10 @@ private struct Sprite {
         "STTTTS",
         " PPPP ",
         " P  P ",
-        " B  B ",
+        " B  B "
     ], scale: 0.98)
 
-    // Same build, scaled right down — reads as "small person".
+    /// Same build, scaled right down — reads as "small person".
     static let child = Sprite(rows: [
         " HH ",
         "HFFH",
@@ -556,10 +601,10 @@ private struct Sprite {
         " TT ",
         "STTS",
         " PP ",
-        " BB ",
+        " BB "
     ], scale: 0.72)
 
-    // Hunched, grey (forced), a cane down the right side.
+    /// Hunched, grey (forced), a cane down the right side.
     static let elderly = Sprite(rows: [
         " HHHH ",
         "HHHHHH",
@@ -570,10 +615,10 @@ private struct Sprite {
         "STTTS ",
         " PPPP ",
         " P  P ",
-        " B  B ",
+        " B  B "
     ], scale: 0.9)
 
-    // Seated block — no standing legs; the wheel ring is drawn around it separately.
+    /// Seated block — no standing legs; the wheel ring is drawn around it separately.
     static let wheelchair = Sprite(rows: [
         " HHHH ",
         "HFFFFH",
@@ -582,10 +627,10 @@ private struct Sprite {
         "TTTTTT",
         "STTTTS",
         " PPPP ",
-        " PPPP ",
+        " PPPP "
     ], scale: 1.0)
 
-    // Flat cap over the brow (`K`) and a plum vest torso (`T` → staff colour) — the "marshal" cues.
+    /// Flat cap over the brow (`K`) and a plum vest torso (`T` → staff colour) — the "marshal" cues.
     static let staff = Sprite(rows: [
         "KKKKKK",
         " KKKK ",
@@ -596,6 +641,6 @@ private struct Sprite {
         "STTTTS",
         " PPPP ",
         " P  P ",
-        " B  B ",
+        " B  B "
     ], scale: 1.0)
 }
