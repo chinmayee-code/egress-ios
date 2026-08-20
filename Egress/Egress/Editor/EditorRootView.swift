@@ -60,6 +60,13 @@ struct EditorRootView: View {
         .navigationDestination(isPresented: $goToSimulate) {
             SimulateScreen(venue: model.venue, config: model.config)
         }
+        .tourHost(
+            Tours.editor,
+            hasSeen: Binding(
+                get: { feedback?.settings.seenEditorTour ?? true },
+                set: { feedback?.settings.seenEditorTour = $0 }
+            )
+        )
     }
 
     // MARK: Top bar — title · settings · run
@@ -89,6 +96,7 @@ struct EditorRootView: View {
                 .accessibilityLabel("Rename and configure venue")
                 Spacer(minLength: EgressSpacing.xs)
                 circleButton("ellipsis", label: "All settings") { showConfig = true }
+                    .tourAnchor(.editorConfig)
                 runButton
             }
             HStack {
@@ -134,6 +142,7 @@ struct EditorRootView: View {
         .disabled(!model.isSimulable)
         .accessibilityLabel("Run simulation")
         .accessibilityHint(model.isSimulable ? "Runs the evacuation" : (model.blockingIssue ?? "Not ready to run"))
+        .tourAnchor(.editorRun)
     }
 
     private var toolStatePill: some View {
@@ -346,6 +355,7 @@ struct EditorRootView: View {
         .padding(EgressSpacing.md)
         .background(RoundedRectangle.egSquircle(EgressRadius.lg).fill(Color.egSurfaceRaised))
         .overlay(RoundedRectangle.egSquircle(EgressRadius.lg).strokeBorder(Color.egOutline, lineWidth: 2))
+        .tourAnchor(.editorTools)
         .padding(.horizontal, EgressSpacing.md)
         .padding(.bottom, EgressSpacing.sm)
     }

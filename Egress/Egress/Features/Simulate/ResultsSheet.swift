@@ -1,4 +1,5 @@
 import EgressEngine
+import SwiftData
 import SwiftUI
 
 // MARK: - Verdict presentation
@@ -48,6 +49,9 @@ struct ResultsSheet: View {
 
     @Environment(FeedbackServices.self)
     private var feedback: FeedbackServices?
+    /// Used to patch RALLY's prose into the saved run's report snapshot once the advice resolves.
+    @Environment(\.modelContext)
+    private var modelContext
     /// The score-ring sweep is decorative motion: under Reduce Motion the number cross-fades to its
     /// final value instead of sweeping, and the reveal ticks are skipped (§5.6).
     @Environment(\.accessibilityReduceMotion)
@@ -84,9 +88,10 @@ struct ResultsSheet: View {
         .egButtonSound()
         .task(id: result.id) {
             advice = await CoachProvider.shared.advise(for: result, venue: result.venue)
-            if advice != nil {
-                feedback?.haptics.play(.rallyAppears)
-            } // §5.5: 1 soft tap per card
+            if let advice {
+                feedback?.haptics.play(.rallyAppears) // §5.5: 1 soft tap per card
+                patchReportCoach(advice) // fold RALLY's prose into the saved run's report
+            }
         }
         .task(id: result.id) {
             await runScoreReveal()
@@ -115,6 +120,22 @@ struct ResultsSheet: View {
         case .fail: feedback?.sound.play(.verdictFail)
             feedback?.haptics.play(.verdictFail)
         }
+    }
+
+    /// Fold RALLY's resolved prose into the run's stored report. The record was saved keyed to
+    /// `result.id`, so we fetch it back and patch the coach fields in place. Silent no-op if the record
+    /// isn't found (e.g. a preview with no store) — the report just shows without a coach section.
+    private func patchReportCoach(_ advice: CoachAdvice) {
+        let runID = result.id
+        let descriptor = FetchDescriptor<RunRecord>(predicate: #Predicate { $0.id == runID })
+        guard let record = try? modelContext.fetch(descriptor).first,
+              var snapshot = record.report else { return }
+        snapshot.coachHeadline = advice.headline
+        snapshot.coachBody = advice.body
+        snapshot.coachClosing = advice.closing
+        snapshot.coachSource = advice.source.label
+        record.report = snapshot
+        try? modelContext.save()
     }
 
     /// The spoken score band (§5.6) — a plain-language qualifier VoiceOver appends to the ring value.
@@ -255,13 +276,13 @@ struct ResultsSheet: View {
             }
 
             if let advice {
-                Text(advice.body)
+                Text(coach: advice.body)
                     .egBody(.callout)
                     .foregroundStyle(Color.egTextPrimary)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 if let closing = advice.closing {
-                    Text(closing)
+                    Text(coach: closing)
                         .egBody(.footnote)
                         .foregroundStyle(Color.egTextSecondary)
                         .frame(maxWidth: .infinity, alignment: .leading)

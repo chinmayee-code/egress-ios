@@ -37,6 +37,27 @@ final class FeedbackSettings {
         didSet { defaults.set(colorBlindPatterns, forKey: Key.colorBlindPatterns.rawValue) }
     }
 
+    /// First-run coachmark flags — one per core screen. Each flips true when its tour is finished or
+    /// skipped, so a tour shows exactly once until the user replays it. Default false (unseen).
+    var seenSpacesTour: Bool {
+        didSet { defaults.set(seenSpacesTour, forKey: Key.seenSpacesTour.rawValue) }
+    }
+
+    var seenEditorTour: Bool {
+        didSet { defaults.set(seenEditorTour, forKey: Key.seenEditorTour.rawValue) }
+    }
+
+    var seenSimulateTour: Bool {
+        didSet { defaults.set(seenSimulateTour, forKey: Key.seenSimulateTour.rawValue) }
+    }
+
+    /// Re-arm every tour so the coachmarks play again on the next visit to each screen (Settings → Replay).
+    func replayTours() {
+        seenSpacesTour = false
+        seenEditorTour = false
+        seenSimulateTour = false
+    }
+
     /// Sound and colour-blind patterns default ON (both part of the intended, accessible experience);
     /// the two "reduce" toggles default OFF. `didSet` never fires for assignments made inside `init`, so
     /// this seeds the store lazily on first write rather than stamping defaults on launch.
@@ -46,10 +67,14 @@ final class FeedbackSettings {
         reduceAudioIntensity = defaults.bool(forKey: Key.reduceAudioIntensity.rawValue)
         reduceHapticIntensity = defaults.bool(forKey: Key.reduceHapticIntensity.rawValue)
         colorBlindPatterns = defaults.object(forKey: Key.colorBlindPatterns.rawValue) as? Bool ?? true
+        seenSpacesTour = defaults.bool(forKey: Key.seenSpacesTour.rawValue)
+        seenEditorTour = defaults.bool(forKey: Key.seenEditorTour.rawValue)
+        seenSimulateTour = defaults.bool(forKey: Key.seenSimulateTour.rawValue)
     }
 
     private let defaults: UserDefaults
     private enum Key: String {
         case soundEnabled, reduceAudioIntensity, reduceHapticIntensity, colorBlindPatterns
+        case seenSpacesTour, seenEditorTour, seenSimulateTour
     }
 }

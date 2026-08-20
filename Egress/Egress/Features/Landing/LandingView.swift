@@ -62,10 +62,14 @@ struct LandingView: View {
     }
     .preferredColorScheme(.light)
     .onAppear {
+      // Audio, not motion — the low music bed plays regardless of Reduce Motion (it honours only the
+      // sound toggle / silent switch). Started before the motion guard below can return early.
+      feedback?.sound.startBackgroundMusic(.landing)
       withAnimation(Motion.card) { shown = true }
       guard !reduceMotion else { return }
       withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) { pulse = true }
     }
+    .onDisappear { feedback?.sound.stopBackgroundMusic() }
   }
 
   /// The illustration band — the real artwork if it has been added, otherwise the drawn diorama.

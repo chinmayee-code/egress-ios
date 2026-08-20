@@ -21,6 +21,8 @@ final class SoundPlayer {
         case verdictFail
         case popup
         case buttonTap
+        /// The guide's "talking" chirp — fired per spoken letter as coachmark text types on (Celeste-style).
+        case speechBlip
         case startSim
         case warning
         case deathMale
@@ -36,6 +38,7 @@ final class SoundPlayer {
         let stingFallback = Self.render(Self.stingScore)
         let passFallback = Self.render(Self.passScore)
         let failFallback = Self.render(Self.failScore)
+        let speechBlipBuf = Self.render(Self.speechBlipScore)
 
         // Load bundled audio buffers (with fallback to synthesized scores)
         let startSimBuf = Self.loadBuffer(named: "start_sim") ?? klaxonFallback
@@ -57,6 +60,7 @@ final class SoundPlayer {
             .verdictFail: failBuf,
             .popup: popupBuf ?? stingFallback,
             .buttonTap: buttonTapBuf,
+            .speechBlip: speechBlipBuf,
             .deathMale: maleDeathBuf,
             .deathFemale: femaleDeathBuf,
             .deathImpact: impactDeathBuf
@@ -68,6 +72,10 @@ final class SoundPlayer {
         // Ambient beds — authentic crowd murmur MP3 or synthesized brown noise
         murmurBuffer = Self.loadBuffer(named: "crowd_murmur") ?? Self.renderMurmur()
         crackleBuffer = Self.renderCrackle()
+
+        // The low background-music bed (landing + simulation) — the whole track, looped. Optional: a
+        // missing file simply leaves the bed silent, like every other failure path here.
+        musicBuffer = Self.loadBuffer(named: "background_theme")
     }
 
     /// Play a cue. Honours the master toggle and the −6 dB Reduce Audio Intensity cap; uses the player
@@ -92,6 +100,9 @@ final class SoundPlayer {
 
             // Soft matched volume (22% volume) for UI interaction cues (popup and button tap)
             let volume: Float = switch cue {
+            case .speechBlip:
+                // Soft and low so a whole sentence of blips reads as speech, not a machine gun.
+                0.16 * cap
             case .popup, .buttonTap:
                 0.22 * cap
             case .deathMale, .deathFemale, .deathImpact:
@@ -196,6 +207,103 @@ final class SoundPlayer {
         ambienceScheduled = false
     }
 
+    // MARK: Background music bed
+
+    /// Named background-music beds — a soft, low, looping bed under the landing screen and the simulation.
+    /// The simulation bed enters at a random point in the track (a "shuffle" feel from one file) and sits
+    /// lower so it never masks the alarm, the deaths or the verdict; the landing bed is a touch more present
+    /// since it's the only voice on that screen. Both loop the *whole* track.
+    enum MusicBed {
+        case landing
+        case simulation
+
+        /// Base volume before the Reduce Audio Intensity cap — deliberately low, well under the one-shot cues.
+        var level: Float {
+            switch self {
+            case .landing: 0.14
+            case .simulation: 0.08
+            }
+        }
+
+        /// Enter at a random offset each time, so a run doesn't always open on the same bar.
+        var randomStart: Bool {
+            switch self {
+            case .landing: false
+            case .simulation: true
+            }
+        }
+    }
+
+    /// Start the background-music bed, fading it in from silence. A no-op when sound is off or the track is
+    /// missing, so the silent switch and master toggle still win.
+    func startBackgroundMusic(_ bed: MusicBed) {
+        musicLevel = bed.level
+        musicRandomStart = bed.randomStart
+        playMusicBed()
+    }
+
+    /// Fade the bed out and stop it (leaving a screen, or the end of a run). Clears the retained level so a
+    /// later foreground return can't bring it back.
+    func stopBackgroundMusic() {
+        musicLevel = nil
+        fadeMusic(to: 0, over: 0.6) // the fade stops the node once it reaches silence
+    }
+
+    /// Bring the bed back after a background→foreground cycle tore the engine down (see `stop()`), if one was
+    /// playing. Called from the app's scene-phase handler on `.active`; a no-op if no bed was active.
+    func resumeMusicIfNeeded() {
+        guard musicLevel != nil else { return }
+        playMusicBed()
+    }
+
+    /// Schedule + play the bed at the current `musicLevel`, fading in. Reschedules the loop each time (a
+    /// torn-down node loses its schedule, and each start picks a fresh random entry point).
+    private func playMusicBed() {
+        guard settings.soundEnabled, let level = musicLevel, let buffer = musicBuffer else { return }
+        guard buffer.format.sampleRate == Self.format.sampleRate,
+              buffer.format.channelCount == Self.format.channelCount else { return }
+        do { try startIfNeeded() } catch { return }
+        scheduleMusic(buffer, randomStart: musicRandomStart)
+        music.volume = 0
+        if !music.isPlaying { music.play() }
+        fadeMusic(to: cappedMusicLevel(level), over: 0.9)
+    }
+
+    /// Loop the bed forever. For a random start we loop a rotated copy of the track (same length, phase-
+    /// shifted) so the entry point moves but the loop stays seamless — `AVAudioPCMBuffer` has no
+    /// partial-offset schedule of its own.
+    private func scheduleMusic(_ buffer: AVAudioPCMBuffer, randomStart: Bool) {
+        music.stop()
+        let bed: AVAudioPCMBuffer = (randomStart && buffer.frameLength > 0)
+            ? Self.rotatedBuffer(buffer, by: AVAudioFrameCount.random(in: 0 ..< buffer.frameLength))
+            : buffer
+        music.scheduleBuffer(bed, at: nil, options: [.loops], completionCallbackType: .dataPlayedBack) { _ in }
+    }
+
+    private func cappedMusicLevel(_ level: Float) -> Float {
+        (settings.reduceAudioIntensity ? 0.5 : 1.0) * level
+    }
+
+    /// Ramp `music.volume` to `target` over `duration` in small main-loop steps, so the change is inaudible
+    /// as a step. A new fade supersedes any in-flight one (generation guard); a fade to zero stops the node.
+    private func fadeMusic(to target: Float, over duration: TimeInterval) {
+        musicFadeGeneration += 1
+        stepMusicFade(generation: musicFadeGeneration, from: music.volume, to: target, step: 0, of: max(1, Int(duration / 0.03)))
+    }
+
+    private func stepMusicFade(generation: Int, from start: Float, to target: Float, step: Int, of steps: Int) {
+        guard generation == musicFadeGeneration else { return } // superseded by a newer fade
+        music.volume = start + (target - start) * Float(step) / Float(steps)
+        guard step < steps else {
+            music.volume = target
+            if target == 0 { music.stop() }
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
+            self?.stepMusicFade(generation: generation, from: start, to: target, step: step + 1, of: steps)
+        }
+    }
+
     /// Tear the engine down on backgrounding (§5.4); it restarts lazily on the next `play`.
     func stop() {
         for node in playerNodes {
@@ -203,6 +311,9 @@ final class SoundPlayer {
         }
         deathQueue.removeAll()
         stopAmbience()
+        // Stop the music node but keep `musicLevel`, so `resumeMusicIfNeeded` can fade it back on return.
+        music.stop()
+        musicFadeGeneration += 1 // cancel any in-flight fade
         engine.stop()
         try? session.setActive(false, options: .notifyOthersOnDeactivation)
         started = false
@@ -218,13 +329,24 @@ final class SoundPlayer {
     /// The two looping ambience voices, mixed in under the one-shot cues.
     private let murmur = AVAudioPlayerNode()
     private let crackle = AVAudioPlayerNode()
+    /// The low background-music bed (landing + simulation), mixed in under both the ambience and the cues.
+    private let music = AVAudioPlayerNode()
     private let session = AVAudioSession.sharedInstance()
     private let buffers: [Cue: AVAudioPCMBuffer]
     private let murmurBuffer: AVAudioPCMBuffer
     private let crackleBuffer: AVAudioPCMBuffer
+    /// Optional: nil (missing file) leaves the music bed silent.
+    private let musicBuffer: AVAudioPCMBuffer?
     private var started = false
     private var ambienceOn = false
     private var ambienceScheduled = false
+
+    /// The bed's target level while it is active, or nil when off. Retained across a background→foreground
+    /// cycle so the bed can fade back in on return; the random-start policy is remembered alongside it.
+    private var musicLevel: Float?
+    private var musicRandomStart = false
+    /// Bumped on every fade so a superseded fade's queued main-loop steps become no-ops.
+    private var musicFadeGeneration = 0
 
     /// Pending death cues awaiting their spacing slot, plus the rate-limit book-keeping.
     private var deathQueue: [Cue] = []
@@ -246,7 +368,7 @@ final class SoundPlayer {
             engine.attach(node)
             engine.connect(node, to: engine.mainMixerNode, format: Self.format)
         }
-        for node in [murmur, crackle] where engine.attachedNodes.contains(node) == false {
+        for node in [murmur, crackle, music] where engine.attachedNodes.contains(node) == false {
             engine.attach(node)
             engine.connect(node, to: engine.mainMixerNode, format: Self.format)
         }
@@ -318,6 +440,27 @@ final class SoundPlayer {
         }
     }
 
+    /// A frame-rotated copy of `source` (same length, samples shifted so playback begins `offset` frames in
+    /// and wraps around). Gives the looping music bed a random, seamless entry point from a single track.
+    private static func rotatedBuffer(_ source: AVAudioPCMBuffer, by offset: AVAudioFrameCount) -> AVAudioPCMBuffer {
+        let frames = source.frameLength
+        guard frames > 0,
+            let out = AVAudioPCMBuffer(pcmFormat: source.format, frameCapacity: frames),
+            let src = source.floatChannelData,
+            let dst = out.floatChannelData else { return source }
+        out.frameLength = frames
+        let count = Int(frames)
+        let shift = Int(offset % frames)
+        let tail = count - shift
+        for channel in 0 ..< Int(source.format.channelCount) {
+            let input = src[channel]
+            let output = dst[channel]
+            for i in 0 ..< tail { output[i] = input[shift + i] }
+            for i in 0 ..< shift { output[tail + i] = input[i] }
+        }
+        return out
+    }
+
     // MARK: - Synthesis
 
     /// One note in a cue: pitch, length, timbre and gain.
@@ -351,6 +494,13 @@ final class SoundPlayer {
         Note(hz: 784, seconds: 0.10, wave: .square, gain: 0.75),
         Note(hz: 1046, seconds: 0.10, wave: .square, gain: 0.75),
         Note(hz: 1318, seconds: 0.20, wave: .square, gain: 0.8)
+    ]
+
+    /// A tiny two-tone triangle chirp — the guide's per-letter speech blip. Triangle (not square) so a
+    /// stream of them at typing speed reads as a soft, friendly voice rather than a harsh beep.
+    private static let speechBlipScore: [Note] = [
+        Note(hz: 720, seconds: 0.018, wave: .triangle, gain: 0.7),
+        Note(hz: 610, seconds: 0.020, wave: .triangle, gain: 0.6)
     ]
 
     /// Descending 4-note minor motif on soft triangle waves — low and sombre, never comedic.

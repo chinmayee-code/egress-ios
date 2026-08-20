@@ -65,6 +65,7 @@ struct EgressTabBar: View {
         .buttonStyle(PlusPress())
         .accessibilityLabel("Create a space")
         .accessibilityHint("Opens the editor")
+        .tourAnchor(.spacesCreate)
     }
 
     private func end(_ tab: AppTab, icon: AppSymbol, label: String) -> some View {

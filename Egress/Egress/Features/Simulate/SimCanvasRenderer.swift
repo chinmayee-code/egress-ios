@@ -83,6 +83,8 @@ enum SimulationRenderer {
             into: &context
         )
         VenueScenery.drawExits(venue.exits, projection: projection, into: &context)
+        // The fallen sit on the floor, beneath the living crowd who step over/around them.
+        AgentSprites.drawCasualties(snapshot.agents, projection: projection, into: &context)
         AgentSprites.drawCrowd(snapshot.agents, projection: projection, time: snapshot.live.elapsed, into: &context)
     }
 

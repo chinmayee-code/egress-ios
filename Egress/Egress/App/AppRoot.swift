@@ -53,6 +53,16 @@ struct AppRoot: View {
                 }
                 .onPreferenceChange(HidesTabBarKey.self) { hideTabBar = $0 }
         }
+        // The Spaces coachmark tour is hosted here so it can point at both the page and the tab bar ＋;
+        // it only arms while Spaces is the current tab.
+        .tourHost(
+            Tours.spaces,
+            hasSeen: Binding(
+                get: { feedback?.settings.seenSpacesTour ?? true },
+                set: { feedback?.settings.seenSpacesTour = $0 }
+            ),
+            enabled: selection == .spaces
+        )
         .tint(Color.egDataGreen) // the single accent
         .preferredColorScheme(.light) // one committed cream look — never the system dark theme
         .fullScreenCover(isPresented: $showBlankEditor) {

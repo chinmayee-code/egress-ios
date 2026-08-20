@@ -19,30 +19,52 @@ struct SpacesRootView: View {
     @State private var showSettings = false
     /// Flips true on first appearance to stagger the preset cards in.
     @State private var appeared = false
+    /// Which preset the carousel is centred on — drives the page-dot indicator and paging snap.
+    @State private var currentPreset: VenuePreset.ID?
+    /// The run whose full report is open (presented as a full-screen cover); nil when none.
+    @State private var selectedRun: RunRecord?
+    /// Decorative entrances (card + row stagger) collapse to a plain fade under Reduce Motion (§5.6).
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Deletes a run from history via the row's context menu.
+    @Environment(\.modelContext) private var modelContext
+    /// For the soft haptic when a run is deleted; optional so previews without the services still render.
+    @Environment(FeedbackServices.self) private var feedback: FeedbackServices?
 
     init(onOpenPreset: @escaping (VenuePreset) -> Void) {
         self.onOpenPreset = onOpenPreset
         var descriptor = FetchDescriptor<RunRecord>(sortBy: [SortDescriptor(\.date, order: .reverse)])
         descriptor.fetchLimit = 10 // cap the recent-runs list at the ten most recent
         _runs = Query(descriptor)
+        _currentPreset = State(initialValue: VenuePreset.catalog.first?.id)
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: EgressSpacing.xl) {
-                header
+        VStack(spacing: 0) {
+            // The header is the screen's chrome — pin it above the scroll so it always clears the status
+            // bar / Dynamic Island, and the scrolling gallery never slides up underneath it into the top
+            // safe area (a plain ScrollView lets its content scroll under the status bar).
+            header
+                .padding(.horizontal, EgressSpacing.lg)
 
-                presetSection
+            ScrollView {
+                VStack(alignment: .leading, spacing: EgressSpacing.xl) {
+                    if !runs.isEmpty { summaryStrip }
 
-                runsSection
+                    presetSection
+
+                    runsSection
+                }
+                .padding(.horizontal, EgressSpacing.lg)
+                .padding(.top, EgressSpacing.md)
+                .padding(.bottom, EgressSpacing.xl)
             }
-            .padding(.horizontal, EgressSpacing.lg)
-            .padding(.top, EgressSpacing.sm)
-            .padding(.bottom, EgressSpacing.xl)
+            .scrollIndicators(.hidden)
         }
         .background(Color.egGround)
-        .scrollIndicators(.hidden)
         .sheet(isPresented: $showSettings) { SettingsSheet() }
+        .fullScreenCover(item: $selectedRun) { run in
+            RunReportView(run: run)
+        }
         .onAppear { appeared = true }
     }
 
@@ -75,8 +97,51 @@ struct SpacesRootView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Settings")
+            .tourAnchor(.spacesSettings)
         }
         .padding(.top, EgressSpacing.sm)
+    }
+
+    // MARK: Summary
+
+    /// Best safety score across the loaded runs — the number to beat.
+    private var bestScore: Int? { runs.map(\.score).max() }
+    /// The most recent run's verdict (runs are date-descending), for the "last" chip.
+    private var lastLevel: VerdictLevel? { runs.first.flatMap { VerdictLevel(rawValue: $0.verdictRaw) } }
+
+    /// A one-line orientation strip above the gallery: how many runs are on file, the best score so
+    /// far, and how the latest run landed — each a tiny labelled stat, the last tinted by verdict.
+    private var summaryStrip: some View {
+        HStack(spacing: EgressSpacing.sm) {
+            summaryChip(label: "Runs",
+                        value: runs.count >= 10 ? "10+" : "\(runs.count)",
+                        tint: Color.egTextPrimary)
+            summaryChip(label: "Best",
+                        value: bestScore.map(String.init) ?? "—",
+                        tint: Color.egDataGreenDeep)
+            summaryChip(label: "Last",
+                        value: lastLevel?.label ?? runs.first?.verdictRaw.uppercased() ?? "—",
+                        tint: lastLevel?.tint ?? Color.egTextPrimary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(runs.count) recent runs. Best score \(bestScore.map(String.init) ?? "none"). Last verdict \(lastLevel?.label ?? "none").")
+    }
+
+    private func summaryChip(label: String, value: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label).egMicroLabel()
+            Text(value)
+                .font(.system(.callout, design: .rounded, weight: .heavy))
+                .foregroundStyle(tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, EgressSpacing.sm)
+        .padding(.horizontal, EgressSpacing.md)
+        .background(RoundedRectangle.egSquircle(EgressRadius.md).fill(Color.egSurfaceRaised))
+        .overlay(RoundedRectangle.egSquircle(EgressRadius.md).strokeBorder(Color.egOutline.opacity(0.12), lineWidth: 1))
     }
 
     // MARK: Presets
@@ -92,18 +157,40 @@ struct SpacesRootView: View {
                             PresetCard(preset: preset)
                         }
                         .buttonStyle(PressableCardStyle())
-                        .opacity(appeared ? 1 : 0)
-                        .offset(x: appeared ? 0 : 24)
-                        .animation(Motion.card.delay(Double(index) * 0.06), value: appeared)
+                        .tourAnchor(.spacesPreset, if: index == 0)
+                        .opacity(appeared || reduceMotion ? 1 : 0)
+                        .offset(x: appeared || reduceMotion ? 0 : 24)
+                        .animation(reduceMotion ? nil : Motion.card.delay(Double(index) * 0.06), value: appeared)
                     }
                 }
+                .scrollTargetLayout()
                 .padding(.vertical, EgressSpacing.xs)
                 .padding(.trailing, EgressSpacing.md) // let the last card breathe past the edge
             }
+            .scrollTargetBehavior(.viewAligned)
+            .scrollPosition(id: $currentPreset, anchor: .leading)
             // Let the carousel bleed to the screen edges while the rest of the page keeps its margin.
             .padding(.horizontal, -EgressSpacing.lg)
             .padding(.horizontal, EgressSpacing.lg)
+
+            pageDots
         }
+    }
+
+    /// Page dots under the carousel: the current preset fills into a short bar, the rest stay hairline.
+    private var pageDots: some View {
+        HStack(spacing: EgressSpacing.sm) {
+            ForEach(VenuePreset.catalog) { preset in
+                let active = preset.id == currentPreset
+                Capsule(style: .continuous)
+                    .fill(active ? Color.egTextPrimary : Color.egSeparator)
+                    .frame(width: active ? 18 : 7, height: 7)
+                    .animation(reduceMotion ? nil : Motion.tap, value: currentPreset)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, EgressSpacing.xxs)
+        .accessibilityHidden(true)
     }
 
     // MARK: Recent runs
@@ -113,12 +200,7 @@ struct SpacesRootView: View {
             sectionHeader("Recent runs")
 
             if runs.isEmpty {
-                Text("Pick a preset or tap ＋, run an evacuation, and its result lands here.")
-                    .egBody(.subheadline)
-                    .foregroundStyle(Color.egTextSecondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(EgressSpacing.lg)
-                    .background(RoundedRectangle.egSquircle(EgressRadius.md).fill(Color.egSurfaceRaised))
+                emptyRunsState
             } else {
                 // One borderless cream container; rows carry no outline, just a hairline between them.
                 VStack(spacing: 0) {
@@ -129,12 +211,56 @@ struct SpacesRootView: View {
                                 .frame(height: 1)
                                 .padding(.horizontal, EgressSpacing.lg)
                         }
-                        RunRow(run: run)
+                        Button { selectedRun = run } label: { RunRow(run: run) }
+                            .buttonStyle(PressableCardStyle())
+                            .accessibilityHint("Opens the full run report")
+                            .contextMenu {
+                                Button(role: .destructive) { deleteRun(run) } label: {
+                                    Label("Delete run", systemImage: "trash")
+                                }
+                            }
+                            .opacity(appeared || reduceMotion ? 1 : 0)
+                            .offset(y: appeared || reduceMotion ? 0 : 16)
+                            .animation(reduceMotion ? nil : Motion.card.delay(Double(index) * 0.06), value: appeared)
                     }
                 }
                 .background(RoundedRectangle.egSquircle(EgressRadius.lg).fill(Color.egSurfaceRaised))
             }
         }
+    }
+
+    /// Shown before the first run: the guide mascot invites the user to run an evacuation.
+    private var emptyRunsState: some View {
+        HStack(spacing: EgressSpacing.lg) {
+            Image("guide_mascot")
+                .resizable()
+                .interpolation(.none) // keep the pixel edges crisp when scaled
+                .aspectRatio(contentMode: .fit)
+                .frame(height: 96)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: EgressSpacing.xs) {
+                Text("No runs yet")
+                    .font(.system(.headline, design: .serif, weight: .bold))
+                    .foregroundStyle(Color.egTextPrimary)
+                Text("Pick a preset or tap ＋, run an evacuation, and its result lands here.")
+                    .egBody(.subheadline)
+                    .foregroundStyle(Color.egTextSecondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(EgressSpacing.lg)
+        .background(RoundedRectangle.egSquircle(EgressRadius.lg).fill(Color.egSurfaceRaised))
+    }
+
+    /// Remove a run from history (row context menu). The `@Query` refreshes automatically, so the row
+    /// animates out; a soft tap confirms the delete. Deletes the persisted record and saves.
+    private func deleteRun(_ run: RunRecord) {
+        feedback?.haptics.play(.toolTap)
+        withAnimation(reduceMotion ? nil : Motion.card) {
+            modelContext.delete(run)
+        }
+        try? modelContext.save()
     }
 
     /// A prominent title-case section label — the gallery's shelf headings.
@@ -168,12 +294,29 @@ private struct RunRow: View {
     private var level: VerdictLevel? { VerdictLevel(rawValue: run.verdictRaw) }
     private var tint: Color { level?.tint ?? Color.egTextPrimary }
 
+    /// "2h ago", "Yesterday" — a glanceable recency stamp, formatted once and reused.
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter
+    }()
+
+    private var relativeDate: String {
+        // The formatter renders a just-saved run as "in 0 sec" (it rounds a ~0 interval up); a plain
+        // "Just now" reads far better for anything under a minute old.
+        if abs(run.date.timeIntervalSinceNow) < 60 { return "Just now" }
+        return Self.relativeFormatter.localizedString(for: run.date, relativeTo: .now)
+    }
+
     var body: some View {
         HStack(alignment: .center, spacing: EgressSpacing.md) {
             VStack(alignment: .leading, spacing: EgressSpacing.sm) {
-                Text(run.venueName)
-                    .font(.system(.headline, design: .serif, weight: .bold))
-                    .foregroundStyle(Color.egTextPrimary)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(run.venueName)
+                        .font(.system(.headline, design: .serif, weight: .bold))
+                        .foregroundStyle(Color.egTextPrimary)
+                    Text(relativeDate).egMicroLabel()
+                }
 
                 HStack(alignment: .top, spacing: EgressSpacing.md) {
                     stat("Type", (run.venueType?.displayName ?? run.venueTypeRaw).uppercased())
@@ -184,14 +327,26 @@ private struct RunRow: View {
 
             Spacer(minLength: EgressSpacing.sm)
 
-            VStack(alignment: .trailing, spacing: EgressSpacing.sm) {
-                PixelText(text: "\(run.score)", pixel: 3.0, color: tint)
-                verdictPill
+            HStack(alignment: .center, spacing: EgressSpacing.sm) {
+                VStack(alignment: .trailing, spacing: EgressSpacing.sm) {
+                    PixelText(text: "\(run.score)", pixel: 3.0, color: tint)
+                    verdictPill
+                }
+                // "Open report" arrow to the right of the score/verdict, vertically centred — signals the
+                // whole row is tappable. Decorative for VoiceOver (the row announces its own label).
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(Color.egTextTertiary)
+                    .accessibilityHidden(true)
             }
         }
         .padding(EgressSpacing.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // Make the *whole* row a tap target — a Button's label only hit-tests where content actually is,
+        // so without this the Spacer gap and the padding between the text and the chevron ignore taps.
+        .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(run.venueName), \(level?.label ?? run.verdictRaw), score \(run.score). \(run.occupancy) people, cleared in \(Int(run.clearanceTime)) seconds.")
+        .accessibilityLabel("\(run.venueName), \(level?.label ?? run.verdictRaw), score \(run.score). \(run.occupancy) people, cleared in \(Int(run.clearanceTime)) seconds. \(relativeDate).")
     }
 
     private func stat(_ label: String, _ value: String) -> some View {

@@ -107,6 +107,7 @@ struct SimulateScreen: View {
                                 fps: controller.fps,
                                 band: densityBand
                             )
+                            .tourAnchor(.simHUD)
                             if let escalation = controller.escalation {
                                 EscalationBanner(escalation: escalation)
                             }
@@ -120,6 +121,7 @@ struct SimulateScreen: View {
                     .overlay(alignment: .bottomLeading) {
                         SimZoomControls(controller: controller)
                             .padding(EgressSpacing.md)
+                            .tourAnchor(.simZoom)
                     }
                     .overlay(alignment: .bottom) {
                         if let notice = performanceNotice {
@@ -145,6 +147,7 @@ struct SimulateScreen: View {
             }
 
             controls
+                .tourAnchor(.simTransport)
         }
         .animation(reduceMotion ? .easeInOut(duration: 0.2) : Motion.banner, value: controller.escalation)
         .padding(EgressSpacing.md)
@@ -177,7 +180,13 @@ struct SimulateScreen: View {
             updateAmbience()
             checkCasualties()
         }
-        .onDisappear { feedback?.sound.stopAmbience() }
+        // A soft, low music bed plays for the whole time you're in a run (paused or not), entering at a
+        // random point each time; the crowd/fire ambience above rides on top only while running.
+        .onAppear { feedback?.sound.startBackgroundMusic(.simulation) }
+        .onDisappear {
+            feedback?.sound.stopAmbience()
+            feedback?.sound.stopBackgroundMusic()
+        }
         .onChange(of: controller.result?.id) { _, id in
             if id != nil {
                 persistLatestRun()
@@ -196,6 +205,13 @@ struct SimulateScreen: View {
                 )
             }
         }
+        .tourHost(
+            Tours.simulate,
+            hasSeen: Binding(
+                get: { feedback?.settings.seenSimulateTour ?? true },
+                set: { feedback?.settings.seenSimulateTour = $0 }
+            )
+        )
     }
 
     /// Drives the results sheet off the controller's `result`; dismissing clears it.
@@ -212,14 +228,20 @@ struct SimulateScreen: View {
 
     private func persistLatestRun() {
         guard let result = controller.result else { return }
+        // Fire isn't recoverable from geometry alone — read it from live hazard state (or infer from any
+        // casualties, the only current hazard source) so the report's hazard flags are honest.
+        let hasFire = !controller.snapshot.hazards.fire.isEmpty || result.metrics.casualties > 0
+        let snapshot = RunReportSnapshot(result: result, venue: controller.venue, hasFire: hasFire)
         let record = RunRecord(
+            id: result.id, // keyed to the RunResult so coach prose can be patched in once it resolves
             venueName: controller.venue.name,
             venueTypeRaw: controller.venue.type.rawValue,
             score: result.score.value,
             verdictRaw: result.verdict.level.rawValue,
             clearanceTime: result.metrics.clearance,
             occupancy: result.metrics.spawnedCount,
-            seed: String(controller.seed)
+            seed: String(controller.seed),
+            reportJSON: snapshot.jsonString
         )
         modelContext.insert(record)
         try? modelContext.save()

@@ -51,6 +51,29 @@ struct SettingsSheet: View {
                         )
                     }
 
+                    settingsCard("Tutorials", footer: SettingsCopy.tutorialsFooter) {
+                        Button {
+                            settings.replayTours()
+                            feedback.haptics.play(.toolTap)
+                            dismiss() // return to the screen so the re-armed coachmarks can play
+                        } label: {
+                            HStack {
+                                Label("Replay tutorials", systemImage: "sparkles")
+                                    .font(.system(.body, design: .rounded, weight: .semibold))
+                                    .foregroundStyle(Color.egTextPrimary)
+                                Spacer()
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(Color.egTextTertiary)
+                            }
+                            .padding(.horizontal, EgressSpacing.lg)
+                            .padding(.vertical, EgressSpacing.md)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Shows the guided tips again on Spaces, the editor and a simulation")
+                    }
+
                     settingsCard("How scoring works") {
                         prose(SettingsCopy.scoring, style: .callout)
                     }
@@ -189,6 +212,7 @@ private enum SettingsCopy {
     static let soundFooter = "Cues respect the silent switch and mix with your own audio. No safety event is ever signalled by sound alone."
     static let hapticsFooter = "Haptics play on device only, and only for events that concern the analyst — thresholds, casualties and verdicts."
     static let accessibilityFooter = "The crowding bands carry a texture as well as a colour — sparse dots for congestion, diagonal hatch for at-risk, cross-hatch for a crush — so density is never signalled by colour alone."
+    static let tutorialsFooter = "Bring back the guided coachmarks — the safety inspector will walk you through each screen again."
     static let scoring = "The Safety Score starts at 100 and deducts for casualties, dangerous density, the fraction of the crowd left at risk, and slow clearance. A run PASSES, gets a WARN, or FAILS on those same thresholds."
     static let disclaimer = "Egress is an educational analysis tool, not certified engineering advice. Runs are simplified models — always defer to a qualified fire-safety professional and your local building code."
     static let privacyFooter = "100% on-device. Egress asks for no permissions — no network, location, camera or contacts — and nothing you simulate ever leaves this iPhone."

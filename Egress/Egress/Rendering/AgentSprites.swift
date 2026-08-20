@@ -53,6 +53,18 @@ enum AgentSprites {
     /// Eyes + mouth ink — a warm near-black that reads on every skin tone.
     private static let faceInkColor = Color(hex: 0x241E1A)
 
+    // MARK: Corpse palette (death polish §4)
+
+    /// The fallen are drawn drained of colour — a grey/black/off-white ramp so a body reads instantly as
+    /// *gone* against the living crowd's saturated clothing, and never as just another quiet person.
+    private static let corpseHead = Color(hex: 0xC9C7C4) // pallid, near-white
+    private static let corpseTorso = Color(hex: 0x8C8A88) // mid grey
+    private static let corpseLimb = Color(hex: 0x777573) // splayed arms
+    private static let corpseLeg = Color(hex: 0x5C5A58) // darker grey
+    private static let corpseFoot = Color(hex: 0x2B2A29) // near-black
+    /// Pooled blood — the app's brick accent, laid translucent so it stains the floor rather than paints it.
+    private static let bloodColor = Color.egAccentBrick
+
     /// Draw the whole active crowd. `time` is the run's elapsed seconds — it drives only the
     /// deterministic step cycle and panic jitter, so identical snapshots still render identically.
     static func drawCrowd(
@@ -249,6 +261,43 @@ enum AgentSprites {
         context.fill(faceInk, with: .color(faceInkColor)) // eyes + mouth on top of the face
 
         drawEmotes(agents, projection: projection, unit: unit, into: &context)
+    }
+
+    // MARK: Casualties
+
+    /// Draw the fallen — a **stateless layer under the living crowd** (design §4). For every casualty in
+    /// the snapshot (injured or dead; the engine retains them at their frozen death position) we stamp a
+    /// pixel-art coffin at the frozen death position. Like `drawCrowd`, it's a pure function of the
+    /// snapshot — the coffin sits at `agent.position`, so a paused or scrubbed frame renders identically
+    /// and nothing here can perturb the physics. The coffin art is resolved once and drawn per casualty,
+    /// so a mass-casualty floor stays cheap.
+    static func drawCasualties(
+        _ agents: [AgentRender],
+        projection: CanvasProjection,
+        into context: inout GraphicsContext
+    ) {
+        let casualties = agents.filter { $0.status.isCasualty }
+        guard !casualties.isEmpty else { return }
+
+        let unit = max(2.4, projection.length(SafetyStandards.bodyRadius))
+
+        // A coffin marks each of the fallen. Resolved once and drawn per casualty with nearest-neighbour
+        // interpolation so the pixel art stays crisp at any zoom. Upright and uniform, so a grave reads
+        // instantly against the living crowd stepping over it.
+        let coffin = context.resolve(Image("coffin").interpolation(.none))
+        let coffinHeight = unit * 2.6
+        let coffinWidth = coffinHeight * CGFloat(478.0 / 522.0) // source art aspect (w:h)
+
+        for agent in casualties {
+            let centre = projection.point(agent.position)
+            let rect = CGRect(
+                x: centre.x - coffinWidth / 2,
+                y: centre.y - coffinHeight / 2,
+                width: coffinWidth,
+                height: coffinHeight
+            )
+            context.draw(coffin, in: rect)
+        }
     }
 
     // MARK: Deterministic per-agent choices
@@ -629,6 +678,31 @@ private struct Sprite {
         " PPPP ",
         " PPPP "
     ], scale: 1.0)
+
+    /// Prone corpse builds (design §4 "death polish") — a body on the floor, head to the left, legs to
+    /// the right, arms splayed. Drawn through the casualty layer's own material routing (`H` head · `T`
+    /// torso · `A` limb · `P` legs · `B` foot) in the drained corpse palette, not the living skin/hair
+    /// colours. Two silhouettes so the fallen still read male / female at a glance.
+    static let corpseMale = Sprite(rows: [
+        "      A    ",
+        " HH TTTTPP ",
+        "HHHHTTTTPPB",
+        " HH TTTTPP ",
+        "      A    "
+    ], scale: 1.0)
+
+    /// Fuller head (framed by longer hair) and a slighter frame — the female read, lying down.
+    static let corpseFemale = Sprite(rows: [
+        " H    A    ",
+        "HHHHTTTTPP ",
+        "HHHHTTTTPPB",
+        "HHHHTTTTPP ",
+        " H    A    "
+    ], scale: 1.0)
+
+    static func corpse(male: Bool) -> Sprite {
+        male ? corpseMale : corpseFemale
+    }
 
     /// Flat cap over the brow (`K`) and a plum vest torso (`T` → staff colour) — the "marshal" cues.
     static let staff = Sprite(rows: [

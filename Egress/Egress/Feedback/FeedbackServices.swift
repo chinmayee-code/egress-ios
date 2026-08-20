@@ -27,6 +27,9 @@ final class FeedbackServices {
         case .background:
             sound.stop()
             haptics.stop()
+        case .active:
+            // The engine was torn down on the way to the background; fade the music bed back if one was on.
+            sound.resumeMusicIfNeeded()
         default:
             break
         }
