@@ -3,14 +3,25 @@ import SwiftUI
 
 // MARK: - PresetCard
 
-/// A gallery card for one furnished preset (design: the Spaces carousel). A live mini-plan of the real
-/// authored layout — the same `VenueScenery` drawing the editor and sim use — with the venue's resident
-/// character standing on it and a difficulty *tier* badge in the corner, above the name and a three-up
-/// CAPACITY · EXITS · DIFFICULTY stat row. Tapping loads exactly the room shown.
+/// A gallery card for one furnished preset, styled as a retro **game cartridge** (design: the cartridge
+/// frame the user supplied — `cartridge_frame` in the asset catalog). The molded gray plastic shell is the
+/// real PNG frame, with a transparent "screen" window: the live authored room plan is drawn behind it and
+/// shows through, the preset name prints across the dark label strip, a CAPACITY · DIFFICULTY read-out sits
+/// in the screen's bottom corner, and the venue's resident stands large in front, breaking out over the
+/// screen border. Tapping loads exactly the room shown.
 struct PresetCard: View {
     let preset: VenuePreset
 
-    /// 1…3 — crowd pressure per exit, mapped to the difficulty dots and the tier badge.
+    // The card is sized to the cropped frame PNG so nothing distorts (984 × 803 → w/h ≈ 1.225).
+    private static let cardWidth: CGFloat = 260
+    private static let frameAspect: CGFloat = 984.0 / 803.0
+
+    // Regions measured from the frame PNG, as fractions of the cropped image (0…1).
+    // The transparent screen window and the dark header well, respectively.
+    private static let screen = (x0: 0.1128, y0: 0.3101, x1: 0.8862, y1: 0.8381)
+    private static let header = (x0: 0.1118, y0: 0.0461, x1: 0.8872, y1: 0.2565)
+
+    /// 1…3 — crowd pressure per exit, mapped to the difficulty squares (and the resident's mood).
     private var difficulty: Int {
         let perExit = Double(preset.crowd) / Double(max(1, preset.venue.exits.count))
         switch perExit {
@@ -20,21 +31,11 @@ struct PresetCard: View {
         }
     }
 
-    /// The corner badge — a difficulty tier the way the mockup tags its cards (LITE · STD · PRO), lit up
-    /// like a neon sign: bright pixel text and border glowing against the dark thumbnail.
-    private var tier: (label: String, color: Color) {
-        switch difficulty {
-        case 1: ("LITE", Color(hex: 0x3FE0D0)) // neon cyan
-        case 2: ("STD", Color(hex: 0xF5B53D))  // neon amber
-        default: ("PRO", Color(hex: 0xE44FC4)) // neon magenta
-        }
-    }
-
     /// The character who "lives" in this venue — one of the bundled pixel-art residents, picked from the
     /// preset's stable seed so a card keeps the same person across launches and never re-rolls on redraw.
     /// The pool is chosen to *match the difficulty* (design request): a calm, in-control resident on a LITE
     /// room, a neutral or mobility-aided one on STD, and a visibly alarmed one on PRO — the character's mood
-    /// tracks the crowd pressure, so a one-dot card never wears a panicked face.
+    /// tracks the crowd pressure, so a one-square card never wears a panicked face.
     private var residentSprite: String {
         let pool = PresetCard.residents(for: difficulty)
         return pool[preset.id.pixelSeed % pool.count]
@@ -42,9 +43,9 @@ struct PresetCard: View {
 
     /// Resident sprites grouped by mood so a card's person reads its tier. Every id is a `sprite_N`
     /// character in `Assets.xcassets`; the item sprites (pills, hazard drops) are deliberately excluded.
-    ///   • LITE — calm, waving, directing: relaxed and in control.
-    ///   • STD  — neutral, older or mobility-aided: needs care, but isn't panicking.
-    ///   • PRO  — hands on head, arms flailing, frightened: the pressure shows.
+    ///   • 1 — calm, waving, directing: relaxed and in control.
+    ///   • 2 — neutral, older or mobility-aided: needs care, but isn't panicking.
+    ///   • 3 — hands on head, arms flailing, frightened: the pressure shows.
     private static func residents(for difficulty: Int) -> [String] {
         let ids: [Int]
         switch difficulty {
@@ -56,90 +57,82 @@ struct PresetCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: EgressSpacing.md) {
-            // One brown "screen": the room plan on the left, the resident and its tier badge in a column
-            // on the right — both sit on the same dark canvas inside a single pixel border (design request).
-            HStack(alignment: .top, spacing: EgressSpacing.sm) {
-                PresetThumbnail(venue: preset.venue)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+        let cardHeight = PresetCard.cardWidth / PresetCard.frameAspect
+        GeometryReader { geo in
+            let w = geo.size.width, h = geo.size.height
+            let s = PresetCard.screen, hd = PresetCard.header
+            let sRect = CGRect(x: s.x0 * w, y: s.y0 * h, width: (s.x1 - s.x0) * w, height: (s.y1 - s.y0) * h)
+            let hRect = CGRect(x: hd.x0 * w, y: hd.y0 * h, width: (hd.x1 - hd.x0) * w, height: (hd.y1 - hd.y0) * h)
 
-                VStack(alignment: .trailing, spacing: EgressSpacing.xs) {
-                    tierBadge
-                    Spacer(minLength: 0)
-                    Image(residentSprite)
-                        .resizable()
-                        .interpolation(.none) // keep the pixel edges crisp when scaled
-                        .aspectRatio(contentMode: .fit)
-                        .frame(maxHeight: 92)
+            // 1) The live room plan, drawn behind the frame — shows through the transparent screen window.
+            PresetThumbnail(venue: preset.venue)
+                .frame(width: sRect.width, height: sRect.height)
+                .position(x: sRect.midX, y: sRect.midY)
+
+            // 2) The capacity / difficulty read-out — icon + value only — tucked into the screen's
+            //    bottom-left tab (the frame's notch). Behind the frame, so any overflow is clipped.
+            Color.clear
+                .overlay(alignment: .bottomLeading) {
+                    statReadout
+                        .padding(.leading, sRect.minX + 5)
+                        .padding(.bottom, (h - sRect.maxY) + 5)
                 }
-                .frame(maxHeight: .infinity)
-            }
-            .frame(height: 118)
-            .padding(EgressSpacing.sm)
-            .background(Color.egCanvasBase)
-            .clipShape(PixelCornerRect(radius: EgressRadius.sm, pixel: 3))
-            .overlay(
-                PixelCornerRect(radius: EgressRadius.sm, pixel: 3)
-                    .strokeBorder(Color.egOutline, lineWidth: 1.5)
-            )
 
-            Text(preset.title)
-                .font(.system(.title3, design: .serif, weight: .bold))
-                .foregroundStyle(Color.egTextPrimary)
+            // 3) The molded cartridge frame itself (gray shell, header well, stepped border, notches).
+            Image("cartridge_frame")
+                .resizable()
+                .interpolation(.none)
+                .frame(width: w, height: h)
 
-            statsRow
+            // 4) The preset name, centered across the dark label strip in the retro pixel font.
+            PixelText(text: preset.title, pixel: 2.1, color: Color.egCanvasText)
+                .position(x: hRect.midX, y: hRect.midY)
+
+            // 5) The resident, standing large in front and breaking out over the screen's right border.
+            Image(residentSprite)
+                .resizable()
+                .interpolation(.none)
+                .aspectRatio(contentMode: .fit)
+                .frame(height: h * 0.62)
+                .position(x: sRect.maxX - h * 0.06, y: sRect.maxY - h * 0.22)
         }
-        .frame(width: 224)
-        .padding(EgressSpacing.md)
-        .egPixelSurface(radius: EgressRadius.lg)
+        .frame(width: PresetCard.cardWidth, height: cardHeight)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(preset.title). \(preset.crowd) capacity, \(preset.venue.exits.count) exits, difficulty \(difficulty) of 3. \(preset.blurb)")
     }
 
     // MARK: Pieces
 
-    private var tierBadge: some View {
-        PixelText(text: tier.label, pixel: 1.7, color: tier.color)
-            .padding(.horizontal, 5)
-            .padding(.vertical, 4)
-            .background(PixelCornerRect(radius: 5, pixel: 2).fill(Color.black.opacity(0.3)))
-            .overlay(PixelCornerRect(radius: 5, pixel: 2).strokeBorder(tier.color, lineWidth: 1.2))
-            .shadow(color: tier.color.opacity(0.9), radius: 3) // neon glow
-    }
-
-    private var statsRow: some View {
-        HStack(alignment: .top, spacing: EgressSpacing.sm) {
-            stat("Capacity", "\(preset.crowd)")
-            Spacer(minLength: 0)
-            stat("Exits", "\(preset.venue.exits.count)")
-            Spacer(minLength: 0)
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Difficulty").egMicroLabel()
-                difficultyDots
+    /// The compact read-out in the bottom-left notch tab: capacity (green person icon + count) over
+    /// difficulty (red bars icon + filled squares). Icons and values only — no text labels. A faint scrim
+    /// keeps it legible over the room art.
+    private var statReadout: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                PixelBitmap(rows: StatGlyph.capacity, pixel: 1.4, color: Color.egVerdictPass)
+                PixelText(text: "\(preset.crowd)", pixel: 1.6, color: Color.egCanvasText)
+            }
+            HStack(spacing: 4) {
+                PixelBitmap(rows: StatGlyph.difficulty, pixel: 1.4, color: Color.egAccentTerracotta)
+                difficultySquares
             }
         }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 5)
+        .background(RoundedRectangle(cornerRadius: 5).fill(Color.black.opacity(0.32)))
     }
 
-    private func stat(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(label).egMicroLabel()
-            Text(value)
-                .font(.system(.subheadline, design: .rounded, weight: .bold))
-                .foregroundStyle(Color.egTextPrimary)
-        }
-    }
-
-    private var difficultyDots: some View {
-        HStack(spacing: 4) {
+    private var difficultySquares: some View {
+        HStack(spacing: 3) {
             ForEach(0 ..< 3, id: \.self) { i in
-                Circle()
-                    .fill(i < difficulty ? Color.egTextPrimary : Color.clear)
-                    .overlay(Circle().strokeBorder(Color.egTextTertiary, lineWidth: 1))
-                    .frame(width: 8, height: 8)
+                Rectangle()
+                    .fill(i < difficulty ? Color.egCanvasText : Color.clear)
+                    .frame(width: 6, height: 6)
+                    .overlay(Rectangle().strokeBorder(Color.egCanvasText.opacity(0.7), lineWidth: 1))
             }
         }
-        .padding(.top, 2)
     }
+
 }
 
 // MARK: - PresetThumbnail

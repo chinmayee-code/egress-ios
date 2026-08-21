@@ -1,4 +1,4 @@
-import Foundation
+import SwiftUI
 
 // MARK: - Tour catalog
 
@@ -16,7 +16,11 @@ enum Tours {
         TourStep(
             anchor: .spacesPreset,
             title: "Presets",
-            message: "Start from a furnished room like this one — tap a card to open it in the editor."
+            message: "Start from a furnished room — tap a card to open it. The two icons on each card mean:",
+            legend: [
+                TourLegendItem(icon: StatGlyph.capacity, tint: .egVerdictPass, text: "Capacity — how many people are in the room"),
+                TourLegendItem(icon: StatGlyph.difficulty, tint: .egAccentTerracotta, text: "Difficulty — how hard it is to clear, 1 to 3"),
+            ]
         ),
         TourStep(
             anchor: .spacesCreate,

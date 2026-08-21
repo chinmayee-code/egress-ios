@@ -115,33 +115,47 @@ struct SpacesRootView: View {
         HStack(spacing: EgressSpacing.sm) {
             summaryChip(label: "Runs",
                         value: runs.count >= 10 ? "10+" : "\(runs.count)",
+                        icon: "stat_runs",
                         tint: Color.egTextPrimary)
             summaryChip(label: "Best",
                         value: bestScore.map(String.init) ?? "—",
-                        tint: Color.egDataGreenDeep)
+                        icon: "stat_best",
+                        tint: Color.egTextPrimary)
             summaryChip(label: "Last",
                         value: lastLevel?.label ?? runs.first?.verdictRaw.uppercased() ?? "—",
-                        tint: lastLevel?.tint ?? Color.egTextPrimary)
+                        icon: "stat_last",
+                        tint: lastLevel?.tint ?? Color.egVerdictPass)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(runs.count) recent runs. Best score \(bestScore.map(String.init) ?? "none"). Last verdict \(lastLevel?.label ?? "none").")
     }
 
-    private func summaryChip(label: String, value: String, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(label).egMicroLabel()
-            Text(value)
-                .font(.system(.callout, design: .rounded, weight: .heavy))
-                .foregroundStyle(tint)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
+    /// A dark "arcade HUD" stat tile — the chunky pixel-corner box from the Spaces design: a warm near-black
+    /// fill inside a gold pixel border, with a small-caps gold label pinned top-left, the pixel-art icon
+    /// centred as the hero, and the bold value along the bottom. Reuses `PixelCornerRect` so the stepped
+    /// corners match the recent-runs container and the tab bar.
+    private func summaryChip(label: String, value: String, icon: String, tint: Color) -> some View {
+        let shape = PixelCornerRect(radius: EgressRadius.md, pixel: 4)
+        return VStack(spacing: EgressSpacing.sm) {
+            // Label, icon and value all centred, in the app's 5×7 bitmap font (matches the score pills).
+            PixelText(text: label, pixel: 1.6, color: Color.egTextTertiary)
+
+            Image(icon)
+                .resizable()
+                .interpolation(.none) // keep the pixel edges crisp when scaled
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 50, height: 40) // a fixed box so the wide runner and tall heart read at a matched size
+
+            PixelText(text: value, pixel: 2.3, color: tint)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, EgressSpacing.sm)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, EgressSpacing.md)
         .padding(.horizontal, EgressSpacing.md)
-        .background(RoundedRectangle.egSquircle(EgressRadius.md).fill(Color.egSurfaceRaised))
-        .overlay(RoundedRectangle.egSquircle(EgressRadius.md).strokeBorder(Color.egOutline.opacity(0.12), lineWidth: 1))
+        .background(shape.fill(Color.egSurfaceRaised)) // same cream fill as the preset cards
+        // Match the preset card's chrome: a black pixel border with a soft gray inset line inside it.
+        .overlay(shape.strokeBorder(Color.egOutline, lineWidth: 2.5))
+        .overlay(shape.inset(by: 3).strokeBorder(Color.egTextTertiary.opacity(0.55), lineWidth: 1.5))
     }
 
     // MARK: Presets
@@ -202,7 +216,9 @@ struct SpacesRootView: View {
             if runs.isEmpty {
                 emptyRunsState
             } else {
-                // One borderless cream container; rows carry no outline, just a hairline between them.
+                // Cream container with the stat-tile's pixel-corner outline — but the soft cream stroke
+                // only, no black — so the history reads as a bordered card, not a hard black box.
+                let shape = PixelCornerRect(radius: EgressRadius.lg, pixel: 4)
                 VStack(spacing: 0) {
                     ForEach(Array(runs.enumerated()), id: \.element.id) { index, run in
                         if index > 0 {
@@ -224,7 +240,8 @@ struct SpacesRootView: View {
                             .animation(reduceMotion ? nil : Motion.card.delay(Double(index) * 0.06), value: appeared)
                     }
                 }
-                .background(RoundedRectangle.egSquircle(EgressRadius.lg).fill(Color.egSurfaceRaised))
+                .background(shape.fill(Color.egSurfaceRaised))
+                .overlay(shape.strokeBorder(Color.egSeparator, lineWidth: 2))
             }
         }
     }

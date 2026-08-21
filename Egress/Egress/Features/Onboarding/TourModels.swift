@@ -26,6 +26,18 @@ struct TourStep: Identifiable {
     var title: String
     /// What the mascot says about this control.
     var message: String
+    /// Optional icon key below the line — teaches what an unlabeled pixel icon on screen means.
+    var legend: [TourLegendItem] = []
+}
+
+/// One icon-and-caption row in a coachmark's legend, drawn with the same `PixelBitmap` art as the screen so
+/// a first-time user learns exactly the glyph they're looking at (e.g. the preset cards' capacity icon).
+struct TourLegendItem: Identifiable {
+    let id = UUID()
+    /// Pixel-art rows for `PixelBitmap` (see `StatGlyph`).
+    var icon: [String]
+    var tint: Color
+    var text: String
 }
 
 /// An ordered set of coachmarks for one screen.

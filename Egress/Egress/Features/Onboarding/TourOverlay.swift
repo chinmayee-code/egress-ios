@@ -117,6 +117,10 @@ struct TourOverlay: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
+            if !step.legend.isEmpty {
+                legend
+            }
+
             HStack(spacing: EgressSpacing.sm) {
                 progressDots
                 Spacer(minLength: EgressSpacing.sm)
@@ -144,7 +148,31 @@ struct TourOverlay: View {
             BubbleTail().offset(x: -10) // points back at the mascot
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(step.title). \(step.message). Step \(index + 1) of \(total).")
+        .accessibilityLabel("\(step.title). \(step.message). \(legendSpeech)Step \(index + 1) of \(total).")
+    }
+
+    /// The icon key beneath the line — each stat glyph drawn exactly as it appears on screen, next to what
+    /// it means, so the unlabeled pixel icons are self-explanatory the first time through.
+    private var legend: some View {
+        VStack(alignment: .leading, spacing: EgressSpacing.xs) {
+            ForEach(step.legend) { item in
+                HStack(alignment: .center, spacing: EgressSpacing.sm) {
+                    PixelBitmap(rows: item.icon, pixel: 2.4, color: item.tint)
+                        .frame(width: 16, alignment: .leading)
+                    Text(item.text)
+                        .font(.system(.footnote, design: .rounded, weight: .medium))
+                        .foregroundStyle(Color.egTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 2)
+    }
+
+    /// The legend read aloud after the line, so VoiceOver users get the same key.
+    private var legendSpeech: String {
+        step.legend.isEmpty ? "" : step.legend.map(\.text).joined(separator: ". ") + ". "
     }
 
     private var progressDots: some View {

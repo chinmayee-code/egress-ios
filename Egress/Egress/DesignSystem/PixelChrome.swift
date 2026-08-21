@@ -125,6 +125,58 @@ struct PixelText: View {
     }
 }
 
+// MARK: - PixelBitmap
+
+/// A small original pixel-art glyph — a grid of "#" (ink) / " " (paper) rows drawn as filled squares in a
+/// `Canvas`, the icon sibling of `PixelText`. Used for the preset cards' capacity/difficulty icons and the
+/// onboarding tour's matching legend, so both draw exactly the same art.
+struct PixelBitmap: View {
+    let rows: [String]
+    /// Edge length of one pixel.
+    var pixel: CGFloat = 2
+    var color: Color = .egTextPrimary
+
+    var body: some View {
+        let height = rows.count
+        let width = rows.map(\.count).max() ?? 0
+        Canvas { context, _ in
+            for (y, line) in rows.enumerated() {
+                for (x, mark) in line.enumerated() where mark == "#" {
+                    let cell = CGRect(x: CGFloat(x) * pixel, y: CGFloat(y) * pixel, width: pixel, height: pixel)
+                    context.fill(Path(cell), with: .color(color))
+                }
+            }
+        }
+        .frame(width: CGFloat(width) * pixel, height: CGFloat(height) * pixel)
+        .accessibilityHidden(true)
+    }
+}
+
+// MARK: - StatGlyph
+
+/// The shared capacity / difficulty stat icons behind `PixelBitmap`, so the preset cards and the first-run
+/// tour draw the same pixel art. `capacity` is a little person; `difficulty` is three ascending bars.
+enum StatGlyph {
+    static let capacity = [
+        " ### ",
+        " ### ",
+        "  #  ",
+        " ### ",
+        "#####",
+        "# # #",
+        "# # #",
+    ]
+    static let difficulty = [
+        "    #",
+        "    #",
+        "  # #",
+        "  # #",
+        "# # #",
+        "# # #",
+        "# # #",
+    ]
+}
+
 // MARK: - PixelFont
 
 /// The tiny 5×7 bitmap font behind `PixelText` — just the glyphs the run rows need (digits for the score,
@@ -152,11 +204,19 @@ enum PixelFont {
         "8": [" ### ", "#   #", "#   #", " ### ", "#   #", "#   #", " ### "],
         "9": [" ### ", "#   #", "#   #", " ####", "    #", "   # ", " ##  "],
         "A": [" ### ", "#   #", "#   #", "#####", "#   #", "#   #", "#   #"],
+        "B": ["#### ", "#   #", "#   #", "#### ", "#   #", "#   #", "#### "],
         "C": [" ### ", "#   #", "#    ", "#    ", "#    ", "#   #", " ### "],
         "D": ["#### ", "#   #", "#   #", "#   #", "#   #", "#   #", "#### "],
         "E": ["#####", "#    ", "#    ", "#### ", "#    ", "#    ", "#####"],
         "F": ["#####", "#    ", "#    ", "#### ", "#    ", "#    ", "#    "],
+        "G": [" ### ", "#   #", "#    ", "# ###", "#   #", "#   #", " ### "],
+        "H": ["#   #", "#   #", "#   #", "#####", "#   #", "#   #", "#   #"],
         "I": ["#####", "  #  ", "  #  ", "  #  ", "  #  ", "  #  ", "#####"],
+        "J": ["  ###", "   # ", "   # ", "   # ", "#  # ", "#  # ", " ##  "],
+        "K": ["#   #", "#  # ", "# #  ", "##   ", "# #  ", "#  # ", "#   #"],
+        "M": ["#   #", "## ##", "# # #", "# # #", "#   #", "#   #", "#   #"],
+        "V": ["#   #", "#   #", "#   #", "#   #", "#   #", " # # ", "  #  "],
+        "X": ["#   #", "#   #", " # # ", "  #  ", " # # ", "#   #", "#   #"],
         "L": ["#    ", "#    ", "#    ", "#    ", "#    ", "#    ", "#####"],
         "N": ["#   #", "##  #", "# # #", "# # #", "#  ##", "#   #", "#   #"],
         "O": [" ### ", "#   #", "#   #", "#   #", "#   #", "#   #", " ### "],
@@ -170,6 +230,7 @@ enum PixelFont {
         "Y": ["#   #", "#   #", " # # ", "  #  ", "  #  ", "  #  ", "  #  "],
         "Z": ["#####", "    #", "   # ", "  #  ", " #   ", "#    ", "#####"],
         "!": ["  #  ", "  #  ", "  #  ", "  #  ", "  #  ", "     ", "  #  "],
+        "+": ["     ", "  #  ", "  #  ", "#####", "  #  ", "  #  ", "     "],
     ]
 }
 
